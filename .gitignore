@@ -1,0 +1,9 @@
+.pio/
+.platformio-core/
+.venv/
+.vscode/
+compile_commands.json
+include/local_config.h
+*.bin
+*.elf
+*.map
