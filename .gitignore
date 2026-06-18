@@ -1,6 +1,12 @@
 .pio/
 .platformio-core/
 .venv/
+backend/.venv/
+backend/data/*.sqlite3
+backend/data/*.sqlite3-*
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .vscode/
 compile_commands.json
 include/local_config.h

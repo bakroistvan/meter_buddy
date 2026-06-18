@@ -9,6 +9,6 @@ bool begin();
 uint32_t nowUnix();
 bool adjustUnix(uint32_t timestamp);
 bool clearAlarm();
-bool scheduleNextDailyAlarm();
+bool scheduleNextWakeAlarm();
 
 } // namespace rtc_clock

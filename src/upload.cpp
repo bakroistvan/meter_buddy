@@ -53,19 +53,45 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading &batt
   return body;
 }
 
-bool connectWifi() {
+void logEvent(const char *message) {
+  if (config::EnableSerialLogs) {
+    Serial.println(message);
+  }
+}
+
+bool disconnectWifiIfAllowed() {
+  if (config::KeepWifiConnectedWhenAwake) {
+    return true;
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  return true;
+}
+
+} // namespace
+
+bool ensureWifiConnected() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return true;
+  }
+
+  logEvent("wifi connect start");
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);
+  WiFi.setSleep(!config::KeepWifiConnectedWhenAwake);
   WiFi.begin(config::WifiSsid, config::WifiPassword);
 
   const uint32_t started = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - started < config::WifiConnectTimeoutMs) {
     delay(250);
   }
-  return WiFi.status() == WL_CONNECTED;
+
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  logEvent(connected ? "wifi connected" : "wifi connect failed");
+  return connected;
 }
 
 bool syncRtcFromNetwork() {
+  logEvent("ntp sync start");
   configTime(0, 0, config::NtpServer1, config::NtpServer2);
 
   const uint32_t started = millis();
@@ -74,47 +100,62 @@ bool syncRtcFromNetwork() {
     now = time(nullptr);
     if (now > 1700000000) {
       rtc_clock::adjustUnix(static_cast<uint32_t>(now));
-      rtc_clock::scheduleNextDailyAlarm();
+      rtc_clock::scheduleNextWakeAlarm();
+      logEvent("ntp sync success");
       return true;
     }
     delay(250);
   }
+  logEvent("ntp sync failed");
   return false;
 }
 
-} // namespace
-
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
-  if (!connectWifi()) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+  if (!ensureWifiConnected()) {
+    disconnectWifiIfAllowed();
     return Result::WifiFailed;
   }
 
   syncRtcFromNetwork();
 
   if (batch.count == 0) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+    logEvent("upload skipped: no data");
+    disconnectWifiIfAllowed();
     return Result::NoData;
   }
 
-  WiFiClientSecure client;
-  if (config::AllowInsecureTls) {
-    client.setInsecure();
-  } else if (strlen(config::TlsCaCert) > 0) {
-    client.setCACert(config::TlsCaCert);
+  // Use plain TCP for http://, TLS for https://
+  const bool useTls = strncmp(config::UploadUrl, "https://", 8) == 0;
+
+  WiFiClient *client;
+  WiFiClient plainClient;
+  WiFiClientSecure tlsClient;
+
+  if (useTls) {
+    if (config::AllowInsecureTls) {
+      tlsClient.setInsecure();
+    } else if (strlen(config::TlsCaCert) > 0) {
+      tlsClient.setCACert(config::TlsCaCert);
+    } else {
+      logEvent("upload failed: tls not configured");
+      disconnectWifiIfAllowed();
+      return Result::HttpFailed;
+    }
+    client = &tlsClient;
   } else {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    return Result::HttpFailed;
+    client = &plainClient;
+  }
+
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload url=%s\n", config::UploadUrl);
+    Serial.printf("upload wifi rssi=%d\n", WiFi.RSSI());
   }
 
   HTTPClient http;
   http.setTimeout(config::HttpTimeoutMs);
-  if (!http.begin(client, config::UploadUrl)) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
+  if (!http.begin(*client, config::UploadUrl)) {
+    logEvent("upload failed: http begin");
+    disconnectWifiIfAllowed();
     return Result::HttpFailed;
   }
 
@@ -122,16 +163,27 @@ Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batt
   http.addHeader("Content-Type", "application/json");
 
   const String body = buildBody(batch, batteryReading);
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload post start records=%u bytes=%u\n", batch.count, body.length());
+  }
   const int status = http.POST(body);
   http.end();
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  disconnectWifiIfAllowed();
 
   if (status < 0) {
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload http error=%d reason=%s\n", status, HTTPClient::errorToString(status).c_str());
+    }
     return Result::HttpFailed;
   }
   if (status == 200 || status == 201) {
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload accepted status=%d\n", status);
+    }
     return Result::Success;
+  }
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload rejected status=%d\n", status);
   }
   return Result::ServerRejected;
 }

@@ -7,7 +7,7 @@ namespace storage {
 
 constexpr uint8_t MaxUploadRecords = 48;
 
-struct ReadingRecord {
+struct __attribute__((packed)) ReadingRecord {
   uint32_t sequence;
   uint32_t periodStart;
   uint32_t periodEnd;

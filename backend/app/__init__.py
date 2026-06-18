@@ -1,0 +1,2 @@
+"""Meter Buddy FastAPI backend."""
+

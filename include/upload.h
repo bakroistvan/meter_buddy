@@ -13,8 +13,9 @@ enum class Result {
   ServerRejected,
 };
 
+bool ensureWifiConnected();
+bool syncRtcFromNetwork();
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading);
 const char *resultName(Result result);
 
 } // namespace upload
-

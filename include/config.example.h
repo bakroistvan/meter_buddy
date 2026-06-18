@@ -31,7 +31,14 @@ constexpr uint32_t PulseAwakeThresholdMs = 8000;
 constexpr uint32_t PulseAwakeQuietMs = 30000;
 constexpr uint32_t PulseAwakeMaxMs = 300000;
 constexpr uint32_t PulseDebounceMs = 50;
+constexpr uint32_t AwakePulseFlushMs = 5000;
+constexpr uint32_t WifiReconnectIntervalMs = 10000;
 
+// RTC wake interval in minutes. Default 1440 (24 h). Set to 1 for debug/testing.
+constexpr uint16_t RtcWakeIntervalMinutes = 1440;
+
+constexpr bool EnableDeepSleep = true;
+constexpr bool KeepWifiConnectedWhenAwake = false;
 constexpr bool StayAwakeOnUsbBoot = true;
 constexpr bool EnableSerialLogs = true;
 

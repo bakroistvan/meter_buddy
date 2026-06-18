@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterator
+
+from .schemas import UploadPayload
+
+
+def default_db_path() -> Path:
+    return Path(__file__).resolve().parents[1] / "data" / "meter_buddy.sqlite3"
+
+
+def db_path() -> Path:
+    return Path(os.getenv("METER_BUDDY_DB_PATH", str(default_db_path())))
+
+
+def connect() -> sqlite3.Connection:
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+@contextmanager
+def connection() -> Iterator[sqlite3.Connection]:
+    conn = connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with connection() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS upload_dumps (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              received_at TEXT NOT NULL,
+              device_id TEXT NOT NULL,
+              meter_impulses_per_kwh INTEGER NOT NULL,
+              upload_trigger TEXT,
+              battery_v REAL,
+              battery_pct_est INTEGER,
+              reading_count INTEGER NOT NULL,
+              raw_json TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS meter_readings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              dump_id INTEGER NOT NULL REFERENCES upload_dumps(id) ON DELETE CASCADE,
+              device_id TEXT NOT NULL,
+              timestamp TEXT NOT NULL,
+              period_start TEXT,
+              pulses INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_upload_dumps_received_at
+              ON upload_dumps(received_at);
+
+            CREATE INDEX IF NOT EXISTS idx_meter_readings_device_timestamp
+              ON meter_readings(device_id, timestamp);
+
+            CREATE INDEX IF NOT EXISTS idx_meter_readings_dump_id
+              ON meter_readings(dump_id);
+            """
+        )
+
+
+def store_upload(payload: UploadPayload) -> tuple[int, int]:
+    received_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    raw_json = json.dumps(payload.model_dump(mode="json"), separators=(",", ":"))
+
+    with connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO upload_dumps (
+              received_at,
+              device_id,
+              meter_impulses_per_kwh,
+              upload_trigger,
+              battery_v,
+              battery_pct_est,
+              reading_count,
+              raw_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                received_at,
+                payload.device_id,
+                payload.meter_impulses_per_kwh,
+                payload.upload_trigger,
+                payload.battery_v,
+                payload.battery_pct_est,
+                len(payload.readings),
+                raw_json,
+            ),
+        )
+        dump_id = int(cursor.lastrowid)
+
+        conn.executemany(
+            """
+            INSERT INTO meter_readings (
+              dump_id,
+              device_id,
+              timestamp,
+              period_start,
+              pulses
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    dump_id,
+                    payload.device_id,
+                    reading.timestamp.isoformat().replace("+00:00", "Z"),
+                    reading.period_start.isoformat().replace("+00:00", "Z")
+                    if reading.period_start
+                    else None,
+                    reading.pulses,
+                )
+                for reading in payload.readings
+            ],
+        )
+
+    return dump_id, len(payload.readings)
+
+
+def list_dumps() -> list[sqlite3.Row]:
+    with connection() as conn:
+        return list(
+            conn.execute(
+                """
+                SELECT
+                  id,
+                  received_at,
+                  device_id,
+                  meter_impulses_per_kwh,
+                  upload_trigger,
+                  battery_v,
+                  battery_pct_est,
+                  reading_count
+                FROM upload_dumps
+                ORDER BY received_at DESC, id DESC
+                """
+            )
+        )
+
+
+def get_dump_meta(dump_id: int) -> dict | None:
+    with connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, received_at, device_id, meter_impulses_per_kwh,
+                   upload_trigger, battery_v, battery_pct_est, reading_count
+            FROM upload_dumps WHERE id = ?
+            """,
+            (dump_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def get_dump_json(dump_id: int) -> str | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT raw_json FROM upload_dumps WHERE id = ?",
+            (dump_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return str(row["raw_json"])
+

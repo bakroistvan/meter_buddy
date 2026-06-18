@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meter Buddy Dumps</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 2rem;
+        color: #1f2933;
+        background: #f7f9fb;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        font-size: 1.6rem;
+        margin-bottom: 1rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: white;
+        border: 1px solid #d9e2ec;
+      }
+
+      th,
+      td {
+        padding: 0.7rem;
+        border-bottom: 1px solid #d9e2ec;
+        text-align: left;
+        font-size: 0.95rem;
+      }
+
+      th {
+        background: #eef2f6;
+      }
+
+      .empty {
+        padding: 1rem;
+        background: white;
+        border: 1px solid #d9e2ec;
+      }
+
+      .preview-btn {
+        cursor: pointer;
+        color: #1f6fb0;
+        text-decoration: underline;
+        background: none;
+        border: none;
+        font-size: 0.95rem;
+        padding: 0;
+      }
+
+      .preview-btn:hover {
+        color: #0e4a7a;
+      }
+
+      .preview-row pre {
+        margin: 0;
+        padding: 0.5rem;
+        background: #f4f6f8;
+        border: 1px solid #d9e2ec;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        max-height: 300px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .preview-row {
+        display: none;
+      }
+
+      .preview-row.visible {
+        display: table-row;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Meter Buddy Dumps</h1>
+      <table id="dumps-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Device</th>
+            <th>Received</th>
+            <th>Readings</th>
+            <th>Battery</th>
+            <th>Download</th>
+            <th>Preview</th>
+          </tr>
+        </thead>
+        <tbody id="dumps-body">
+        </tbody>
+      </table>
+      <p class="empty" id="empty-msg">No dumps stored yet.</p>
+    </main>
+
+    <script>
+      function batteryCell(dump) {
+        var html = "";
+        if (dump.battery_v !== null) {
+          html += dump.battery_v.toFixed(2) + " V";
+        } else {
+          html += "n/a";
+        }
+        if (dump.battery_pct_est !== null) {
+          html += " (" + dump.battery_pct_est + "%)";
+        }
+        return html;
+      }
+
+      function buildRow(dump) {
+        var row = document.createElement("tr");
+        row.className = "dump-row";
+        row.id = "dump-row-" + dump.id;
+        row.innerHTML =
+          "<td>" + dump.id + "</td>" +
+          "<td>" + escapeHtml(dump.device_id) + "</td>" +
+          "<td>" + escapeHtml(dump.received_at) + "</td>" +
+          "<td>" + dump.reading_count + "</td>" +
+          "<td>" + batteryCell(dump) + "</td>" +
+          "<td><a href='/dumps/" + dump.id + ".json'>JSON</a></td>" +
+          "<td><button class='preview-btn' data-dump-id='" + dump.id + "'>Preview</button></td>";
+        return row;
+      }
+
+      function buildPreviewRow(dump) {
+        var row = document.createElement("tr");
+        row.className = "preview-row";
+        row.id = "preview-row-" + dump.id;
+        row.innerHTML = "<td colspan='7'><pre id='preview-content-" + dump.id + "'>Loading...</pre></td>";
+        return row;
+      }
+
+      function escapeHtml(str) {
+        var div = document.createElement("div");
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+      }
+
+      function addDumpRow(dump, prepend) {
+        var tbody = document.getElementById("dumps-body");
+        var empty = document.getElementById("empty-msg");
+        if (empty) empty.style.display = "none";
+
+        var row = buildRow(dump);
+        var previewRow = buildPreviewRow(dump);
+        if (prepend) {
+          tbody.insertBefore(row, tbody.firstChild);
+          tbody.insertBefore(previewRow, tbody.firstChild.nextSibling || null);
+        } else {
+          tbody.appendChild(row);
+          tbody.appendChild(previewRow);
+        }
+        attachPreview(row.querySelector(".preview-btn"));
+      }
+
+      function attachPreview(btn) {
+        btn.addEventListener("click", function () {
+          var dumpId = this.dataset.dumpId;
+          var previewRow = document.getElementById("preview-row-" + dumpId);
+          var contentEl = document.getElementById("preview-content-" + dumpId);
+          var isVisible = previewRow.classList.contains("visible");
+          if (isVisible) {
+            previewRow.classList.remove("visible");
+            this.textContent = "Preview";
+          } else {
+            if (contentEl.dataset.loaded) {
+              previewRow.classList.add("visible");
+              this.textContent = "Hide";
+              return;
+            }
+            previewRow.classList.add("visible");
+            this.textContent = "Hide";
+            fetch("/dumps/" + dumpId + "/preview")
+              .then(function (r) {
+                if (!r.ok) throw new Error("Failed to load");
+                return r.json();
+              })
+              .then(function (data) {
+                contentEl.textContent = JSON.stringify(data, null, 2);
+                contentEl.dataset.loaded = "1";
+              })
+              .catch(function () {
+                contentEl.textContent = "Failed to load preview.";
+              });
+          }
+        });
+      }
+
+      function connectWs() {
+        var proto = location.protocol === "https:" ? "wss:" : "ws:";
+        var ws = new WebSocket(proto + "//" + location.host + "/ws");
+        ws.onmessage = function (event) {
+          var msg = JSON.parse(event.data);
+          if (msg.type === "new_dump") {
+            addDumpRow(msg.dump, true);
+          }
+        };
+        ws.onclose = function () {
+          setTimeout(connectWs, 2000);
+        };
+      }
+
+      // Load initial dumps
+      var initialDumps = {{ dumps | tojson | safe }};
+      for (var i = initialDumps.length - 1; i >= 0; i--) {
+        addDumpRow(initialDumps[i], false);
+      }
+
+      connectWs();
+    </script>
+  </body>
+</html>

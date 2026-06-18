@@ -13,7 +13,7 @@ constexpr uint16_t HeaderAddress = 0;
 constexpr uint16_t RecordsAddress = 64;
 constexpr uint8_t RecordCount = (EepromSize - RecordsAddress) / sizeof(ReadingRecord);
 
-struct Header {
+struct __attribute__((packed)) Header {
   uint32_t magic;
   uint16_t version;
   uint16_t recordSize;
