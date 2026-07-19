@@ -5,13 +5,16 @@ namespace rtc_clock {
 
 namespace {
 RTC_DS3231 rtc;
+bool initialized = false;
 }
 
 bool begin() {
   if (!rtc.begin()) {
+    initialized = false;
     return false;
   }
 
+  initialized = true;
   rtc.disable32K();
   clearAlarm();
   rtc.writeSqwPinMode(DS3231_OFF);
@@ -19,21 +22,33 @@ bool begin() {
 }
 
 uint32_t nowUnix() {
+  if (!initialized) {
+    return 0;
+  }
   return rtc.now().unixtime();
 }
 
 bool adjustUnix(uint32_t timestamp) {
+  if (!initialized) {
+    return false;
+  }
   rtc.adjust(DateTime(timestamp));
   return true;
 }
 
 bool clearAlarm() {
+  if (!initialized) {
+    return false;
+  }
   rtc.clearAlarm(1);
   rtc.clearAlarm(2);
   return true;
 }
 
 bool scheduleNextWakeAlarm() {
+  if (!initialized) {
+    return false;
+  }
   const DateTime now = rtc.now();
   constexpr uint32_t intervalSec = config::RtcWakeIntervalSeconds;
 

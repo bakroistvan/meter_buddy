@@ -13,6 +13,13 @@
 
 namespace {
 
+enum class WakeSource {
+  None,
+  Pulse,
+  Rtc,
+  UploadButton,
+};
+
 RTC_DATA_ATTR uint32_t lastPulseWakeUnix = 0;
 
 volatile uint32_t awakePulseCount = 0;
@@ -20,6 +27,8 @@ volatile uint32_t lastPulseRiseMs = 0;
 uint32_t lastAwakePulseFlushMs = 0;
 uint32_t lastWifiCheckMs = 0;
 bool awakePulseInterruptAttached = false;
+bool rtcClockAvailable = false;
+bool storageAvailable = false;
 
 void logLine(const char *message) {
   if (config::EnableSerialLogs) {
@@ -33,6 +42,40 @@ void logEvent(const char *event) {
   if (config::EnableSerialLogs) {
     Serial.printf("[%lu] %s\n", static_cast<unsigned long>(millis()), event);
   }
+}
+
+const char *wakeSourceName(WakeSource source) {
+  switch (source) {
+    case WakeSource::Pulse:
+      return "pulse";
+    case WakeSource::Rtc:
+      return "rtc";
+    case WakeSource::UploadButton:
+      return "upload-button";
+    default:
+      return "none";
+  }
+}
+
+WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
+  if (cause != ESP_SLEEP_WAKEUP_GPIO) {
+    return WakeSource::None;
+  }
+
+  const bool pulseHigh = digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH;
+  const bool rtcLow = digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW;
+  const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
+
+  if (pulseHigh) {
+    return WakeSource::Pulse;
+  }
+  if (rtcLow) {
+    return WakeSource::Rtc;
+  }
+  if (uploadPressed) {
+    return WakeSource::UploadButton;
+  }
+  return WakeSource::None;
 }
 
 void configurePins() {
@@ -277,7 +320,10 @@ void handleDiagnosticsBoot() {
 }
 
 uint32_t currentTimestamp() {
-  return rtc_clock::nowUnix();
+  if (rtcClockAvailable) {
+    return rtc_clock::nowUnix();
+  }
+  return millis() / 1000UL;
 }
 
 void flushAwakePulses() {
@@ -355,33 +401,44 @@ void setup() {
   // Initialize the RTC and storage subsystems before handling boot behavior.
   const bool rtcOk = rtc_clock::begin();
   const bool storageOk = storage::begin();
+  rtcClockAvailable = rtcOk;
+  storageAvailable = storageOk;
   if (!rtcOk) {
-    logLine("rtc init failed");
+    logLine("rtc init failed; using fallback timestamps");
   }
   if (!storageOk) {
-    logLine("storage init failed");
+    logLine("storage init failed; persistence disabled for this boot");
   }
 
   // Read the current timestamp and wake cause to decide how the boot should proceed.
-  const uint32_t timestamp = rtcOk ? rtc_clock::nowUnix() : 0;
+  const uint32_t timestamp = currentTimestamp();
   const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  const WakeSource wakeSource = resolveWakeSource(cause);
+
+  if (config::EnableSerialLogs) {
+    Serial.printf("boot cause=%d wake=%s rtc_available=%d storage_available=%d\n",
+                  static_cast<int>(cause),
+                  wakeSourceName(wakeSource),
+                  rtcClockAvailable ? 1 : 0,
+                  storageAvailable ? 1 : 0);
+  }
 
   // Handle a wake caused by the pulse input before returning to deep sleep.
-  if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH) {
+  if (wakeSource == WakeSource::Pulse) {
     handlePulseWake(timestamp);
     enterDeepSleep();
     return;
   }
 
   // Handle a wake caused by the RTC before returning to deep sleep.
-  if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW) {
+  if (wakeSource == WakeSource::Rtc) {
     handleRtcWake(timestamp);
     enterDeepSleep();
     return;
   }
 
   // Handle a wake caused by the upload button before returning to deep sleep.
-  if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(pins::UploadButtonPin) == LOW) {
+  if (wakeSource == WakeSource::UploadButton) {
     handleUploadWake();
     enterDeepSleep();
     return;
@@ -389,7 +446,9 @@ void setup() {
 
   // Run the boot diagnostics and schedule the next wake alarm.
   handleDiagnosticsBoot();
-  rtc_clock::scheduleNextWakeAlarm();
+  if (rtcClockAvailable) {
+    rtc_clock::scheduleNextWakeAlarm();
+  }
 
   // Enter deep sleep for normal boots unless the device should stay awake on USB.
   if (!config::StayAwakeOnUsbBoot) {

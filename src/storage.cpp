@@ -7,6 +7,8 @@ namespace storage {
 
 namespace {
 
+bool initialized = false;
+
 RTC_DATA_ATTR uint32_t rtcCurrentPeriodStart = 0;
 RTC_DATA_ATTR uint32_t rtcCurrentPulses = 0;
 
@@ -97,8 +99,10 @@ void compactRecords() {
 
 bool begin() {
   if (!LittleFS.begin(true)) {
+    initialized = false;
     return false;
   }
+  initialized = true;
   loadSyncState();
   loadNextSequence();
   return true;
@@ -109,6 +113,9 @@ bool incrementCurrentPulse(uint32_t timestamp) {
 }
 
 bool addPulses(uint32_t timestamp, uint32_t count) {
+  if (!initialized) {
+    return false;
+  }
   if (count == 0) return true;
   if (rtcCurrentPeriodStart == 0) {
     rtcCurrentPeriodStart = timestamp;
@@ -118,6 +125,9 @@ bool addPulses(uint32_t timestamp, uint32_t count) {
 }
 
 bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv) {
+  if (!initialized) {
+    return false;
+  }
   if (rtcCurrentPulses == 0) {
     rtcCurrentPeriodStart = timestamp;
     return true;
@@ -147,6 +157,9 @@ bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv) {
 
 bool loadUploadBatch(UploadBatch &batch) {
   batch = {};
+  if (!initialized) {
+    return false;
+  }
   File file = LittleFS.open(RecordsFile, FILE_READ);
   if (!file) return true;
 
@@ -166,6 +179,9 @@ bool loadUploadBatch(UploadBatch &batch) {
 }
 
 bool markSyncedThrough(uint32_t sequence) {
+  if (!initialized) {
+    return false;
+  }
   if (sequence > syncedThrough && sequence < nextSequence) {
     syncedThrough = sequence;
     saveSyncState();
@@ -175,11 +191,18 @@ bool markSyncedThrough(uint32_t sequence) {
 }
 
 uint32_t unsyncedCount() {
+  if (!initialized) {
+    return 0;
+  }
   if (nextSequence == 0 || nextSequence - 1 <= syncedThrough) return 0;
   return (nextSequence - 1) - syncedThrough;
 }
 
 void dump(Stream &stream) {
+  if (!initialized) {
+    stream.println("storage unavailable");
+    return;
+  }
   stream.printf("storage next=%lu synced=%lu rtc_start=%lu rtc_pulses=%lu unsynced=%lu\n",
                 static_cast<unsigned long>(nextSequence),
                 static_cast<unsigned long>(syncedThrough),
@@ -189,6 +212,13 @@ void dump(Stream &stream) {
 }
 
 void clear() {
+  if (!initialized) {
+    nextSequence = 1;
+    syncedThrough = 0;
+    rtcCurrentPeriodStart = 0;
+    rtcCurrentPulses = 0;
+    return;
+  }
   LittleFS.remove(RecordsFile);
   LittleFS.remove(SyncFile);
   LittleFS.remove("/tmp_records.bin");
