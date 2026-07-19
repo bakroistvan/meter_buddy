@@ -82,6 +82,33 @@ $env:PLATFORMIO_CORE_DIR='.\.platformio-core'
 .\meter_buddy.bat upload --port COM5
 ```
 
+## CI firmware build and artifact upload
+
+Every push or pull request that changes the firmware sources triggers a GitHub Actions workflow that builds the PlatformIO firmware and uploads the resulting binary artifacts from the run summary.
+
+The workflow is defined in [.github/workflows/build-firmware.yml](.github/workflows/build-firmware.yml) and publishes:
+
+- `firmware.bin`
+- `firmware.elf`
+- `partitions.bin`
+
+To flash the downloaded artifact to the device locally:
+
+1. Download the `firmware-bin` artifact from the GitHub Actions run.
+2. Extract the archive and locate the `firmware.bin` file.
+3. Connect the ESP32-C3 over USB.
+4. Run the PlatformIO uploader or the helper script with the binary:
+
+```powershell
+.\.venv\Scripts\python -m platformio run --target upload
+```
+
+If you prefer to flash a specific binary manually, use the Espressif uploader with the board's serial port:
+
+```powershell
+esptool.py --chip esp32c3 --port COM5 --baud 460800 write_flash 0x0 firmware.bin
+```
+
 ## Upload Flow
 
 1. Press the D6 upload button.
