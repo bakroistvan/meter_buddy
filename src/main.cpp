@@ -21,6 +21,7 @@ enum class WakeSource {
 };
 
 RTC_DATA_ATTR uint32_t lastPulseWakeUnix = 0;
+RTC_DATA_ATTR uint32_t lastAcceptedPulseWakeUnix = 0;
 
 volatile uint32_t awakePulseCount = 0;
 volatile uint32_t lastPulseRiseMs = 0;
@@ -159,12 +160,28 @@ void detachAwakePulseInterrupt() {
 }
 
 bool sleepMakesSenseAfterPulse(uint32_t timestamp) {
-  if (timestamp == 0 || lastPulseWakeUnix == 0 || timestamp <= lastPulseWakeUnix) {
+  if (timestamp == 0 || lastAcceptedPulseWakeUnix == 0 || timestamp <= lastAcceptedPulseWakeUnix) {
     return true;
   }
 
-  const uint32_t intervalMs = (timestamp - lastPulseWakeUnix) * 1000UL;
+  const uint32_t intervalMs = (timestamp - lastAcceptedPulseWakeUnix) * 1000UL;
   return intervalMs > config::PulseAwakeThresholdMs;
+}
+
+bool isPulseRewake(uint32_t timestamp) {
+  const bool pulseStillHigh = digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH;
+  const bool repeatedTimestamp = timestamp > 0 && lastPulseWakeUnix > 0 && timestamp <= lastPulseWakeUnix;
+
+  if (!pulseStillHigh) {
+    return false;
+  }
+
+  if (repeatedTimestamp) {
+    logEvent("pulse re-wake suppressed: pin still high");
+    return true;
+  }
+
+  return false;
 }
 
 uint32_t countAwakeUntilQuiet() {
@@ -202,15 +219,16 @@ uint32_t countAwakeUntilQuiet() {
 void handlePulseWake(uint32_t timestamp) {
   logEvent("pulse wake");
 
-  // If the timestamp hasn't advanced since the last wake, this is an
-  // immediate re-wake from a pulse that is still HIGH — don't re-count.
-  if (timestamp > 0 && timestamp <= lastPulseWakeUnix) {
-    logEvent("pulse re-wake skipped");
+  // Suppress immediate re-wakes while the pulse line is still held high.
+  // This avoids double-counting the same physical pulse when the ESP32-C3
+  // wakes again before the line has returned low.
+  if (isPulseRewake(timestamp)) {
     return;
   }
 
   const bool sleepNow = sleepMakesSenseAfterPulse(timestamp);
   lastPulseWakeUnix = timestamp;
+  lastAcceptedPulseWakeUnix = timestamp;
 
   uint32_t pulses = 1;
   if (!sleepNow) {
