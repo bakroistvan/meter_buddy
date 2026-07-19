@@ -8,6 +8,7 @@ on:
       - 'include/**'
       - 'src/**'
       - '.github/workflows/build-firmware.yml'
+    tags: ['v*']
   pull_request:
     paths:
       - 'platformio.ini'
@@ -15,6 +16,11 @@ on:
       - 'include/**'
       - 'src/**'
       - '.github/workflows/build-firmware.yml'
+  release:
+    types: [published, created]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -55,3 +61,14 @@ jobs:
             .pio/build/**/firmware.bin
             .pio/build/**/firmware.elf
             .pio/build/**/partitions.bin
+
+      - name: Create Release and upload firmware assets
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            .pio/build/**/firmware.bin
+            .pio/build/**/firmware.elf
+            .pio/build/**/partitions.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
