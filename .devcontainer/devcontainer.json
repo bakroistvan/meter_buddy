@@ -1,0 +1,26 @@
+{
+  "name": "meter_buddy Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint",
+        "platformio.platformio-ide",
+        "marus25.cortex-debug",
+        "ms-vscode.cpptools"
+      ]
+    }
+  },
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "forwardPorts": [8000, 3000, 3333],
+  "postCreateCommand": "if [ -f requirements.txt ]; then pip install -r requirements.txt; fi || true && if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi || true && if [ -f package.json ]; then npm install --silent; fi || true",
+  "remoteUser": "vscode"
+}
