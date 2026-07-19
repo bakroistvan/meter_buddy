@@ -18,7 +18,7 @@ See [docs/README.md](docs/README.md) for the full documentation index and [docs/
 - Seeed Studio XIAO ESP32-C3
 - DS3231 + AT24C32 I2C breakout
 - TEMT6000 light sensor breakout powered continuously from 3.3V
-- Upload button on D6 to GND
+- Upload button on D1 to GND
 - LiPo battery with TP4056 charger
 - 200 kOhm / 200 kOhm battery divider into A0
 
@@ -27,12 +27,11 @@ See [docs/README.md](docs/README.md) for the full documentation index and [docs/
 | Function | XIAO pin | GPIO | Notes |
 | --- | --- | --- | --- |
 | Battery ADC | D0 / A0 | GPIO2 | 1:2 external divider |
-| Unused | D1 | GPIO3 | Do not use for sensor power |
+| Upload button | D1 | GPIO3 | `INPUT_PULLUP`, active low, deep-sleep wake |
 | Pulse wake | D2 | GPIO4 | Active-high deep-sleep GPIO wake |
 | RTC wake | D3 | GPIO5 | DS3231 SQW/INT, active low |
 | I2C SDA | D4 | GPIO6 | DS3231 + AT24C32 |
 | I2C SCL | D5 | GPIO7 | DS3231 + AT24C32 |
-| Upload button | D6 | GPIO21 | `INPUT_PULLUP`, active low |
 
 ## Configuration
 
@@ -111,7 +110,7 @@ esptool.py --chip esp32c3 --port COM5 --baud 460800 write_flash 0x0 firmware.bin
 
 ## Upload Flow
 
-1. Press the D6 upload button.
+1. Press the D1 upload button.
 2. Firmware wakes from deep sleep.
 3. It loads unsynced AT24C32 records.
 4. It samples battery voltage.

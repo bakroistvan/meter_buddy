@@ -59,22 +59,23 @@ const char *wakeSourceName(WakeSource source) {
 }
 
 WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
+  const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
+  if (uploadPressed) {
+    return WakeSource::UploadButton;
+  }
+
   if (cause != ESP_SLEEP_WAKEUP_GPIO) {
     return WakeSource::None;
   }
 
   const bool pulseHigh = digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH;
   const bool rtcLow = digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW;
-  const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
 
   if (pulseHigh) {
     return WakeSource::Pulse;
   }
   if (rtcLow) {
     return WakeSource::Rtc;
-  }
-  if (uploadPressed) {
-    return WakeSource::UploadButton;
   }
   return WakeSource::None;
 }
@@ -111,9 +112,10 @@ void enterDeepSleep() {
   }
 
   // Only GPIOs 0-5 support deep sleep wakeup on ESP32-C3. The upload button
-  // (GPIO21) is excluded; it is polled when the device is already awake.
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::RtcWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::PulseWakePin, ESP_GPIO_WAKEUP_GPIO_HIGH);
+  // on D1/GPIO3 is now included so a button press can wake the device.
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::UploadButtonWakePin), ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::RtcWakePin), ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::PulseWakePin), ESP_GPIO_WAKEUP_GPIO_HIGH);
 
   if (config::EnableSerialLogs) {
     Serial.flush();
@@ -262,7 +264,7 @@ void handleRtcWake(uint32_t timestamp) {
 }
 
 void handleUploadWake() {
-  logEvent("upload wake");
+  logEvent("upload button wake");
   if (!uploadButtonPressed()) {
     logEvent("upload button debounce rejected");
     return;

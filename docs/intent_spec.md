@@ -10,11 +10,12 @@ The device targets the ESP32-C3 microcontroller (Seeed Studio XIAO ESP32C3) with
 
 **Pin Assignments (from include/pins.h):**
 - **A0 (GPIO2)**: BatteryAdcWakePin / BatteryAdcPin — ADC input for battery voltage divider.
-- **D2 (GPIO4)**: PulseWakePin — Light/pulse sensor input (active LOW). Must be deep-sleep wake capable.
+- **D0 / A0 (GPIO2)**: BatteryAdcWakePin / BatteryAdcPin — ADC input for battery voltage divider.
+- **D2 (GPIO4)**: PulseWakePin — Light/pulse sensor input (active HIGH). Must be deep-sleep wake capable.
 - **D3 (GPIO5)**: RtcWakePin — DS3231 RTC interrupt/SQW output (active LOW). Triggers periodic 60-second wakeups.
 - **D4 (GPIO6)**: I2cSdaPin — I2C SDA (for RTC).
 - **D5 (GPIO7)**: I2cSclPin — I2C SCL (for RTC).
-- **D1 (GPIO3)**: UploadButtonPin — User button (active LOW, internal pull-up).
+- **D1 (GPIO3)**: UploadButtonPin — User button (active LOW, internal pull-up, deep-sleep wake capable).
 - **D10 (GPIO10)**: AwakeLedPin — Debug/status LED.
 
 *Note: The external AT24C32 EEPROM chip on the I2C bus will be deprecated and removed from the BOM in favor of internal flash storage.*

@@ -11,7 +11,7 @@ stateDiagram-v2
 
     SLEEP --> PULSE_WAKE : GPIO4 HIGH
     SLEEP --> RTC_WAKE : GPIO5 LOW (RTC alarm)
-    SLEEP --> UPLOAD_WAKE : GPIO21 LOW (button)
+    SLEEP --> UPLOAD_WAKE : GPIO3 LOW (button)
     SLEEP --> LOOP_AWAKE : power-on cold boot\n(deep sleep disabled)
 
     PULSE_WAKE --> SLEEP : timestamp <= lastPulseWakeUnix\n→ re-wake, discard

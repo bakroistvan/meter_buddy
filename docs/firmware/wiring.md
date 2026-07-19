@@ -9,8 +9,7 @@ Wiring follows the pin assignments defined in `include/pins.h`.
 | XIAO Pin | GPIO | Connects to | Notes |
 |----------|------|-------------|-------|
 | D2       | 4    | TEMT6000 OUT | Pulse signal, ext0 wake on RISING |
-| D1       | 3    | Unused       | Intentionally left unconnected |
-| D6       | 21   | Upload button → GND | ext0 wake on LOW |
+| D1       | 3    | Upload button → GND | Deep-sleep wake on LOW |
 | D3       | 5    | DS3231 SQW/INT | Daily alarm wake, ext1 wake on LOW |
 | D4       | 6    | DS3231 SDA   | I2C data line |
 | D5       | 7    | DS3231 SCL   | I2C clock line |
@@ -68,10 +67,10 @@ All GNDs common: XIAO GND, DS3231 GND, TEMT6000 GND,
 
 | Button leg | XIAO pin |
 |-----------|----------|
-| One leg   | D6 (GPIO21) |
+| One leg   | D1 (GPIO3) |
 | Other leg | GND |
 
-> No external pull-up resistor. Firmware enables `Pin.PULL_UP` on D6. A press reads LOW and wakes the ESP32 from deep sleep.
+> No external pull-up resistor. Firmware enables `INPUT_PULLUP` on D1. A press reads LOW and wakes the ESP32 from deep sleep.
 
 ---
 
@@ -115,8 +114,8 @@ BAT+ ─── R1 200kΩ ───┬─── A0 / D0 (GPIO2)
 
 | Function | idea.md pin | pins.h pin |
 |----------|-------------|------------|
-| TEMT6000 VCC | D1 (GPIO3) | **3.3V** (always on) |
-| Upload button | D6 (GPIO21) | D6 (GPIO21) — unchanged |
+| TEMT6000 VCC | 3.3V | **3.3V** (always on) |
+| Upload button | D1 (GPIO3) | D1 (GPIO3) — updated |
 | TEMT6000 OUT | D2 (GPIO4) | D2 (GPIO4) — unchanged |
 | DS3231 alarm | D3 (GPIO5) | D3 (GPIO5) — unchanged |
 | I2C SDA/SCL | D4/D5 | D4/D5 — unchanged |
