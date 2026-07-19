@@ -34,10 +34,12 @@ jobs:
         uses: docker/build-push-action@v7.3.0
         with:
           context: ./backend
-          file: Dockerfile
+          file: ./backend/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
