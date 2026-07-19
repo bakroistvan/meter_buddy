@@ -336,17 +336,23 @@ void pollAwakeControls() {
 } // namespace
 
 void setup() {
+  // Cancel OTA rollback so the firmware can boot normally after a valid update.
   esp_ota_mark_app_valid_cancel_rollback();
 
   if (config::EnableSerialLogs) {
+    // Start serial logging to provide boot-time diagnostics.
     Serial.begin(115200);
     delay(300);
   }
 
+  // Configure the GPIO pins used for wake sources, buttons, and LED status.
   configurePins();
+  // Initialize the I2C bus for attached peripherals.
   Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
+  // Initialize battery monitoring so the device can report power state.
   battery::begin();
 
+  // Initialize the RTC and storage subsystems before handling boot behavior.
   const bool rtcOk = rtc_clock::begin();
   const bool storageOk = storage::begin();
   if (!rtcOk) {
@@ -356,35 +362,42 @@ void setup() {
     logLine("storage init failed");
   }
 
+  // Read the current timestamp and wake cause to decide how the boot should proceed.
   const uint32_t timestamp = rtcOk ? rtc_clock::nowUnix() : 0;
   const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
 
+  // Handle a wake caused by the pulse input before returning to deep sleep.
   if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH) {
     handlePulseWake(timestamp);
     enterDeepSleep();
     return;
   }
 
+  // Handle a wake caused by the RTC before returning to deep sleep.
   if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW) {
     handleRtcWake(timestamp);
     enterDeepSleep();
     return;
   }
 
+  // Handle a wake caused by the upload button before returning to deep sleep.
   if (cause == ESP_SLEEP_WAKEUP_GPIO && digitalRead(pins::UploadButtonPin) == LOW) {
     handleUploadWake();
     enterDeepSleep();
     return;
   }
 
+  // Run the boot diagnostics and schedule the next wake alarm.
   handleDiagnosticsBoot();
   rtc_clock::scheduleNextWakeAlarm();
 
+  // Enter deep sleep for normal boots unless the device should stay awake on USB.
   if (!config::StayAwakeOnUsbBoot) {
     enterDeepSleep();
     return;
   }
 
+  // Keep the device awake and listening for pulses when deep sleep is disabled.
   if (!config::EnableDeepSleep) {
     attachAwakePulseInterrupt();
     if (config::KeepWifiConnectedWhenAwake) {
