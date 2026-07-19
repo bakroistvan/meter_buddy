@@ -247,7 +247,8 @@ void handlePulseWake(uint32_t timestamp) {
 
 void handleRtcWake(uint32_t timestamp) {
   logEvent("rtc wake");
-  rtc_clock::clearAlarm();
+  // Perform full RTC initialization including alarm cleanup for RTC wakes.
+  rtc_clock::begin();
 
   if (config::RtcWakeIntervalSeconds < 86400) {
     digitalWrite(pins::AwakeLedPin, LOW);
@@ -419,7 +420,9 @@ void setup() {
   battery::begin();
 
   // Initialize the RTC and storage subsystems before handling boot behavior.
-  const bool rtcOk = rtc_clock::begin();
+  // Use time-only initialization for leaner pulse wakeups; full init with alarm
+  // cleanup will be done for RTC wakes.
+  const bool rtcOk = rtc_clock::beginTimeOnly();
   const bool storageOk = storage::begin();
   rtcClockAvailable = rtcOk;
   storageAvailable = storageOk;
@@ -494,3 +497,4 @@ void loop() {
   }
   delay(50);
 }
+

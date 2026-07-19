@@ -8,16 +8,24 @@ RTC_DS3231 rtc;
 bool initialized = false;
 }
 
-bool begin() {
+bool beginTimeOnly() {
   if (!rtc.begin()) {
     initialized = false;
     return false;
   }
 
   initialized = true;
+  return true;
+}
+
+bool begin() {
+  if (!beginTimeOnly()) {
+    return false;
+  }
+
   rtc.disable32K();
-  clearAlarm();
   rtc.writeSqwPinMode(DS3231_OFF);
+  clearAlarm();
   return true;
 }
 
@@ -61,3 +69,4 @@ bool scheduleNextWakeAlarm() {
 }
 
 } // namespace rtc_clock
+
