@@ -17,5 +17,6 @@ bool ensureWifiConnected();
 bool syncRtcFromNetwork();
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading);
 const char *resultName(Result result);
+void checkFirmwareUpdate();
 
 } // namespace upload

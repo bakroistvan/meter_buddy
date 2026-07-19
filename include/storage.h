@@ -1,7 +1,6 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Wire.h>
 
 namespace storage {
 
@@ -23,7 +22,7 @@ struct UploadBatch {
   uint32_t newestSequence;
 };
 
-bool begin(TwoWire &wire);
+bool begin();
 bool incrementCurrentPulse(uint32_t timestamp);
 bool addPulses(uint32_t timestamp, uint32_t count);
 bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv);
@@ -31,5 +30,6 @@ bool loadUploadBatch(UploadBatch &batch);
 bool markSyncedThrough(uint32_t sequence);
 uint32_t unsyncedCount();
 void dump(Stream &stream);
+void clear();
 
 } // namespace storage

@@ -26,6 +26,22 @@ Open:
 http://127.0.0.1:8000/
 ```
 
+## Running with Docker / Docker Compose
+
+You can build and run the backend using Docker Compose from the root directory:
+
+```bash
+docker compose up --build -d
+```
+
+This starts the FastAPI backend on port `8000` (i.e. `http://127.0.0.1:8000/`). The SQLite database is stored in a persistent Docker volume named `backend_data`.
+
+To run tests inside the Docker container:
+
+```bash
+docker compose run --entrypoint "python -m pytest tests" backend
+```
+
 ## Configuration
 
 Environment variables:

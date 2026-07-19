@@ -9,6 +9,8 @@ constexpr const char *WifiSsid = "Your iPhone Hotspot";
 constexpr const char *WifiPassword = "change-me";
 
 constexpr const char *UploadUrl = "https://example.com/api/meter-buddy/upload";
+constexpr const char *FirmwareVersionUrl = "https://example.com/api/meter-buddy/firmware/version";
+constexpr const char *FirmwareVersion = "1.0.0";
 constexpr const char *BasicAuthUser = "meter-buddy";
 constexpr const char *BasicAuthPassword = "change-me";
 
@@ -34,8 +36,8 @@ constexpr uint32_t PulseDebounceMs = 50;
 constexpr uint32_t AwakePulseFlushMs = 5000;
 constexpr uint32_t WifiReconnectIntervalMs = 10000;
 
-// RTC wake interval in minutes. Default 1440 (24 h). Set to 1 for debug/testing.
-constexpr uint16_t RtcWakeIntervalMinutes = 1440;
+// RTC wake interval in seconds. Default 60.
+constexpr uint16_t RtcWakeIntervalSeconds = 60;
 
 constexpr bool EnableDeepSleep = true;
 constexpr bool KeepWifiConnectedWhenAwake = false;

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_sleep.h>
+#include <esp_ota_ops.h>
 #include <WiFi.h>
 
 #include "battery.h"
@@ -185,7 +186,7 @@ void handleRtcWake(uint32_t timestamp) {
   logEvent("rtc wake");
   rtc_clock::clearAlarm();
 
-  if (config::RtcWakeIntervalMinutes < 1440) {
+  if (config::RtcWakeIntervalSeconds < 86400) {
     digitalWrite(pins::AwakeLedPin, LOW);
     delay(50);
     digitalWrite(pins::AwakeLedPin, HIGH);
@@ -234,6 +235,7 @@ void handleUploadWake() {
   if (result == upload::Result::Success) {
     storage::markSyncedThrough(batch.newestSequence);
     logEvent("upload marked records synced");
+    upload::checkFirmwareUpdate();
   }
 }
 
@@ -242,6 +244,36 @@ void handleDiagnosticsBoot() {
   storage::dump(Serial);
   const auto reading = battery::sample();
   Serial.printf("battery=%.2fV pct=%u\n", reading.volts, reading.percent);
+
+  Serial.println("Diagnostics REPL. Commands: dump, clear, status, reboot");
+  while (true) {
+    if (Serial.available()) {
+      String cmd = Serial.readStringUntil('\n');
+      cmd.trim();
+      if (cmd == "dump") {
+        storage::dump(Serial);
+      } else if (cmd == "clear") {
+        storage::clear();
+        Serial.println("storage cleared");
+      } else if (cmd == "status") {
+        const auto r = battery::sample();
+        Serial.printf("battery=%.2fV pct=%u wifi=%s\n", r.volts, r.percent, WiFi.status() == WL_CONNECTED ? "connected" : "disconnected");
+      } else if (cmd == "reboot") {
+        ESP.restart();
+      } else if (cmd.length() > 0) {
+        Serial.println("unknown command");
+      }
+    }
+    
+    // flash LED to indicate alive in diagnostics
+    static uint32_t lastLed = 0;
+    if (millis() - lastLed > 1000) {
+      lastLed = millis();
+      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
+    }
+    
+    delay(10);
+  }
 }
 
 uint32_t currentTimestamp() {
@@ -304,6 +336,8 @@ void pollAwakeControls() {
 } // namespace
 
 void setup() {
+  esp_ota_mark_app_valid_cancel_rollback();
+
   if (config::EnableSerialLogs) {
     Serial.begin(115200);
     delay(300);
@@ -314,7 +348,7 @@ void setup() {
   battery::begin();
 
   const bool rtcOk = rtc_clock::begin();
-  const bool storageOk = storage::begin(Wire);
+  const bool storageOk = storage::begin();
   if (!rtcOk) {
     logLine("rtc init failed");
   }

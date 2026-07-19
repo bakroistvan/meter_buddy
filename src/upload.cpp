@@ -1,6 +1,7 @@
 #include "upload.h"
 
 #include <HTTPClient.h>
+#include <HTTPUpdate.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
@@ -202,6 +203,49 @@ const char *resultName(Result result) {
     return "server_rejected";
   }
   return "unknown";
+}
+
+void checkFirmwareUpdate() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  
+  logEvent("ota check start");
+
+  const bool useTls = strncmp(config::FirmwareVersionUrl, "https://", 8) == 0;
+  WiFiClient *client;
+  WiFiClient plainClient;
+  WiFiClientSecure tlsClient;
+
+  if (useTls) {
+    if (config::AllowInsecureTls) {
+      tlsClient.setInsecure();
+    } else if (strlen(config::TlsCaCert) > 0) {
+      tlsClient.setCACert(config::TlsCaCert);
+    } else {
+      logEvent("ota check failed: tls not configured");
+      return;
+    }
+    client = &tlsClient;
+  } else {
+    client = &plainClient;
+  }
+
+  t_httpUpdate_return ret = httpUpdate.update(*client, config::FirmwareVersionUrl, config::FirmwareVersion);
+  
+  if (config::EnableSerialLogs) {
+    switch (ret) {
+      case HTTP_UPDATE_FAILED:
+        Serial.printf("ota failed Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+        break;
+      case HTTP_UPDATE_NO_UPDATES:
+        Serial.println("ota no updates");
+        break;
+      case HTTP_UPDATE_OK:
+        Serial.println("ota success");
+        break;
+    }
+  }
 }
 
 } // namespace upload

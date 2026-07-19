@@ -35,27 +35,14 @@ bool clearAlarm() {
 
 bool scheduleNextWakeAlarm() {
   const DateTime now = rtc.now();
-  constexpr uint32_t intervalMin = config::RtcWakeIntervalMinutes;
+  constexpr uint32_t intervalSec = config::RtcWakeIntervalSeconds;
 
-  // Daily-aligned alarm for intervals >= 24 h
-  if (intervalMin >= 1440) {
-    DateTime next(now.year(), now.month(), now.day(), 0, 0, 0);
-    if (next.unixtime() <= now.unixtime()) {
-      next = next + TimeSpan(1, 0, 0, 0);
-    }
-    rtc.disableAlarm(1);
-    rtc.disableAlarm(2);
-    return rtc.setAlarm1(next, DS3231_A1_Hour);
-  }
-
-  // Short-interval debug: fire every minute with DS3231_A1_Second
-  DateTime next(now.year(), now.month(), now.day(), now.hour(), now.minute(), 0);
-  if (next.unixtime() <= now.unixtime()) {
-    next = next + TimeSpan(0, 0, 1, 0);
-  }
+  DateTime next(now.unixtime() + intervalSec);
   rtc.disableAlarm(1);
   rtc.disableAlarm(2);
-  return rtc.setAlarm1(next, DS3231_A1_Second);
+  
+  // Match hours, minutes, and seconds. Safe for intervals < 24 hours.
+  return rtc.setAlarm1(next, DS3231_A1_Hour);
 }
 
 } // namespace rtc_clock
