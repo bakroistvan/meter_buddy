@@ -2,6 +2,17 @@
 
 Battery-powered ESP32-C3 firmware for counting electricity meter LED pulses and uploading stored readings on demand.
 
+## Repository layout
+
+| Path | Role |
+| --- | --- |
+| `include/`, `src/`, `platformio.ini` | Firmware (PlatformIO / Arduino) |
+| `tools/`, `meter_buddy.bat` | Firmware build/flash helper CLI |
+| `backend/` | FastAPI upload receiver, SQLite store, index UI |
+| `docs/` | Living docs (intent, API contract, wiring, architecture) |
+
+See [docs/README.md](docs/README.md) for the full documentation index and [docs/architecture.md](docs/architecture.md) for package boundaries.
+
 ## Hardware Target
 
 - Seeed Studio XIAO ESP32-C3
@@ -82,6 +93,26 @@ $env:PLATFORMIO_CORE_DIR='.\.platformio-core'
 7. It POSTs JSON to the configured HTTPS endpoint using Basic Auth.
 8. Only HTTP `200` or `201` advances the sync cursor.
 9. The radio shuts down and the ESP32-C3 returns to deep sleep.
+
+JSON field names and auth are defined in [docs/api/upload.md](docs/api/upload.md).
+
+## Backend
+
+From the `backend/` directory:
+
+```powershell
+cd backend
+docker compose up --build -d
+```
+
+Or run with a local venv (see [backend/README.md](backend/README.md)).
+
+- Index UI: `http://127.0.0.1:8000/`
+- Upload endpoint: `POST /api/meter-buddy/upload`
+
+## Hardware wiring
+
+See [docs/firmware/wiring.md](docs/firmware/wiring.md).
 
 ## Current Firmware Notes
 

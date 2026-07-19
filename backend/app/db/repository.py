@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .schemas import UploadPayload
+from app.schemas import UploadPayload
 
 
 def default_db_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "data" / "meter_buddy.sqlite3"
+    # app/db/repository.py → parents[2] == backend/
+    return Path(__file__).resolve().parents[2] / "data" / "meter_buddy.sqlite3"
 
 
 def db_path() -> Path:
@@ -181,4 +182,3 @@ def get_dump_json(dump_id: int) -> str | None:
     if row is None:
         return None
     return str(row["raw_json"])
-

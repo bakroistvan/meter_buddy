@@ -1,6 +1,6 @@
 ﻿# meter_buddy — Technical Specification & Implementation Plan
 
-This document translates the high-level design goals from intent.md into a concrete technical specification and implementation plan, incorporating the proposed unified storage architecture (LittleFS) and OTA update capabilities.
+This document translates the high-level design goals from [intent.md](intent.md) into a concrete technical specification and implementation plan, incorporating the proposed unified storage architecture (LittleFS) and OTA update capabilities.
 
 ---
 

@@ -4,6 +4,7 @@
 backend/.venv/
 backend/data/*.sqlite3
 backend/data/*.sqlite3-*
+backend/.pytest-tmp/
 __pycache__/
 *.py[cod]
 .pytest_cache/

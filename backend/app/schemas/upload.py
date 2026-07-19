@@ -28,4 +28,3 @@ class UploadResponse(BaseModel):
     ok: bool
     dump_id: int
     stored_readings: int
-

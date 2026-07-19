@@ -2,14 +2,35 @@
 
 FastAPI proof-of-concept backend for receiving Meter Buddy upload payloads, storing them in SQLite, and exposing a basic index page with JSON dump downloads.
 
+Upload contract: [docs/api/upload.md](../docs/api/upload.md).
+
+## Layout
+
+```text
+backend/
+├── app/
+│   ├── main.py           # FastAPI app wiring
+│   ├── api/              # HTTP/WebSocket routes
+│   ├── core/             # auth
+│   ├── db/               # SQLite access
+│   ├── schemas/          # Pydantic models
+│   ├── services/         # WebSocket broadcast
+│   └── templates/
+├── tests/
+├── data/                 # local SQLite (gitignored content)
+├── docker-compose.yml
+├── Dockerfile
+└── requirements.txt
+```
+
 ## Setup
 
 ```bash
-sudo apt update
-sudo apt install -y python3 python3-venv
 cd backend
 python3 -m venv .venv
+# Windows: python -m venv .venv
 ./.venv/bin/python -m pip install -r requirements.txt
+# Windows: .\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
 ## Run
@@ -28,17 +49,19 @@ http://127.0.0.1:8000/
 
 ## Running with Docker / Docker Compose
 
-You can build and run the backend using Docker Compose from the root directory:
+From the **`backend/`** directory:
 
 ```bash
+cd backend
 docker compose up --build -d
 ```
 
-This starts the FastAPI backend on port `8000` (i.e. `http://127.0.0.1:8000/`). The SQLite database is stored in a persistent Docker volume named `backend_data`.
+This starts the FastAPI backend on port `8000` (`http://127.0.0.1:8000/`). The SQLite database is stored in a persistent Docker volume named `backend_data`.
 
 To run tests inside the Docker container:
 
 ```bash
+cd backend
 docker compose run --entrypoint "python -m pytest tests" backend
 ```
 
@@ -47,7 +70,7 @@ docker compose run --entrypoint "python -m pytest tests" backend
 Environment variables:
 
 - `METER_BUDDY_DB_PATH`
-  - Default: `backend/data/meter_buddy.sqlite3`
+  - Default: `backend/data/meter_buddy.sqlite3` (relative to the backend package when unset)
 - `METER_BUDDY_AUTH_USER`
   - Default: `meter-buddy`
 - `METER_BUDDY_AUTH_PASSWORD`

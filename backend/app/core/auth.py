@@ -32,4 +32,3 @@ def require_basic_auth(
         detail="Invalid authentication credentials",
         headers={"WWW-Authenticate": "Basic"},
     )
-
