@@ -61,6 +61,73 @@
         color: #0e4a7a;
       }
 
+      .delete-btn {
+        cursor: pointer;
+        color: #b83232;
+        text-decoration: underline;
+        background: none;
+        border: none;
+        font-size: 0.95rem;
+        padding: 0;
+      }
+
+      .delete-btn:hover {
+        color: #7f1d1d;
+      }
+
+      .delete-btn:disabled {
+        cursor: not-allowed;
+        color: #9aa5b1;
+        text-decoration: none;
+      }
+
+      .cleanup-panel {
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background: white;
+        border: 1px solid #d9e2ec;
+      }
+
+      .cleanup-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        align-items: end;
+      }
+
+      .cleanup-controls label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+      }
+
+      .cleanup-controls input {
+        width: 7rem;
+        padding: 0.45rem;
+        border: 1px solid #bcccdc;
+        border-radius: 4px;
+      }
+
+      .cleanup-controls button {
+        padding: 0.5rem 0.8rem;
+        cursor: pointer;
+        color: #b83232;
+        border: 1px solid #e12d39;
+        background: #fff5f5;
+        border-radius: 4px;
+      }
+
+      .cleanup-controls button:hover {
+        background: #ffe3e3;
+      }
+
+      #cleanup-status {
+        min-height: 1.2rem;
+        margin: 0.8rem 0 0;
+        color: #52606d;
+      }
+
       .preview-row pre {
         margin: 0;
         padding: 0.5rem;
@@ -144,6 +211,15 @@
         <p id="plot-status" role="status"></p>
         <canvas id="readings-plot" aria-label="Meter readings plot"></canvas>
       </section>
+
+      <section class="cleanup-panel">
+        <h2>Delete old uploads</h2>
+        <div class="cleanup-controls">
+          <label>Delete uploads up to ID <input id="delete-up-to-id" type="number" min="1"></label>
+          <button id="delete-bulk-button" type="button">Delete range</button>
+        </div>
+        <p id="cleanup-status" role="status"></p>
+      </section>
       <table id="dumps-table">
         <thead>
           <tr>
@@ -154,6 +230,7 @@
             <th>Battery</th>
             <th>Download</th>
             <th>Preview</th>
+            <th>Delete</th>
           </tr>
         </thead>
         <tbody id="dumps-body">
@@ -187,7 +264,8 @@
           "<td>" + dump.reading_count + "</td>" +
           "<td>" + batteryCell(dump) + "</td>" +
           "<td><a href='/dumps/" + dump.id + ".json'>JSON</a></td>" +
-          "<td><button class='preview-btn' data-dump-id='" + dump.id + "'>Preview</button></td>";
+          "<td><button class='preview-btn' data-dump-id='" + dump.id + "'>Preview</button></td>" +
+          "<td><button class='delete-btn' data-dump-id='" + dump.id + "'>Delete</button></td>";
         return row;
       }
 
@@ -195,7 +273,7 @@
         var row = document.createElement("tr");
         row.className = "preview-row";
         row.id = "preview-row-" + dump.id;
-        row.innerHTML = "<td colspan='7'><pre id='preview-content-" + dump.id + "'>Loading...</pre></td>";
+        row.innerHTML = "<td colspan='8'><pre id='preview-content-" + dump.id + "'>Loading...</pre></td>";
         return row;
       }
 
@@ -220,6 +298,96 @@
           tbody.appendChild(previewRow);
         }
         attachPreview(row.querySelector(".preview-btn"));
+        attachDelete(row.querySelector(".delete-btn"));
+      }
+
+      function removeDumpRows(dumpId) {
+        var dumpRow = document.getElementById("dump-row-" + dumpId);
+        var previewRow = document.getElementById("preview-row-" + dumpId);
+        if (dumpRow) dumpRow.remove();
+        if (previewRow) previewRow.remove();
+        if (!document.querySelector(".dump-row")) {
+          var empty = document.getElementById("empty-msg");
+          if (empty) empty.style.display = "block";
+        }
+        updatePlotIdRange();
+      }
+
+      function attachDelete(btn) {
+        btn.addEventListener("click", function () {
+          var dumpId = this.dataset.dumpId;
+          if (!window.confirm("Delete upload #" + dumpId + "? This cannot be undone.")) {
+            return;
+          }
+          this.disabled = true;
+          fetch("/dumps/" + dumpId, { method: "DELETE" })
+            .then(function (r) {
+              if (!r.ok) throw new Error("Delete failed");
+              return r.json();
+            })
+            .then(function () {
+              removeDumpRows(dumpId);
+            })
+            .catch(function () {
+              btn.disabled = false;
+              window.alert("Failed to delete upload #" + dumpId + ".");
+            });
+        });
+      }
+
+      function updatePlotIdRange() {
+        var rows = document.querySelectorAll(".dump-row");
+        var startInput = document.getElementById("plot-start-id");
+        var endInput = document.getElementById("plot-end-id");
+        var deleteInput = document.getElementById("delete-up-to-id");
+        if (!rows.length) {
+          startInput.value = "";
+          endInput.value = "";
+          deleteInput.value = "";
+          return;
+        }
+        var ids = Array.prototype.map.call(rows, function (row) {
+          return Number(row.id.replace("dump-row-", ""));
+        });
+        var minId = Math.min.apply(null, ids);
+        var maxId = Math.max.apply(null, ids);
+        startInput.value = minId;
+        endInput.value = maxId;
+        if (!deleteInput.value || Number(deleteInput.value) > maxId) {
+          deleteInput.value = maxId;
+        }
+      }
+
+      async function deleteUploadRange() {
+        var upToId = Number(document.getElementById("delete-up-to-id").value);
+        var status = document.getElementById("cleanup-status");
+        if (!Number.isInteger(upToId) || upToId < 1) {
+          status.textContent = "Enter a valid upload ID.";
+          return;
+        }
+        var rows = document.querySelectorAll(".dump-row");
+        var matching = Array.prototype.filter.call(rows, function (row) {
+          return Number(row.id.replace("dump-row-", "")) <= upToId;
+        });
+        if (!matching.length) {
+          status.textContent = "No uploads found with ID up to " + upToId + ".";
+          return;
+        }
+        if (!window.confirm("Delete " + matching.length + " upload(s) with ID up to " + upToId + "? This cannot be undone.")) {
+          return;
+        }
+        status.textContent = "Deleting uploads...";
+        try {
+          var response = await fetch("/dumps?up_to_id=" + upToId, { method: "DELETE" });
+          if (!response.ok) throw new Error("Delete failed");
+          var result = await response.json();
+          matching.forEach(function (row) {
+            removeDumpRows(row.id.replace("dump-row-", ""));
+          });
+          status.textContent = "Deleted " + result.deleted_count + " upload(s).";
+        } catch (error) {
+          status.textContent = "Failed to delete uploads: " + error.message;
+        }
       }
 
       function attachPreview(btn) {
@@ -376,6 +544,7 @@
       }
 
       document.getElementById("plot-button").addEventListener("click", plotUploadRange);
+      document.getElementById("delete-bulk-button").addEventListener("click", deleteUploadRange);
       window.addEventListener("resize", function () {
         if (window.lastPlotReadings) plotReadings(window.lastPlotReadings);
       });
@@ -401,9 +570,8 @@
       }
 
       if (initialDumps.length) {
-        var ids = initialDumps.map(function (dump) { return dump.id; });
-        document.getElementById("plot-start-id").value = Math.min.apply(null, ids);
-        document.getElementById("plot-end-id").value = Math.max.apply(null, ids);
+        document.getElementById("delete-up-to-id").value = Math.max.apply(null, initialDumps.map(function (dump) { return dump.id; }));
+        updatePlotIdRange();
       }
 
       connectWs();

@@ -182,3 +182,21 @@ def get_dump_json(dump_id: int) -> str | None:
     if row is None:
         return None
     return str(row["raw_json"])
+
+
+def delete_dump(dump_id: int) -> bool:
+    with connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM upload_dumps WHERE id = ?",
+            (dump_id,),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_dumps_up_to(max_id: int) -> int:
+    with connection() as conn:
+        cursor = conn.execute(
+            "DELETE FROM upload_dumps WHERE id <= ?",
+            (max_id,),
+        )
+        return int(cursor.rowcount)

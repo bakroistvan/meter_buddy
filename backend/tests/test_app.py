@@ -66,6 +66,58 @@ def test_upload_index_and_download(tmp_path, monkeypatch):
         assert missing.status_code == 404
 
 
+def test_delete_dump_and_bulk_delete(tmp_path, monkeypatch):
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    payload = {
+        "device_id": "meter-buddy-001",
+        "meter_impulses_per_kwh": 1000,
+        "upload_trigger": "button",
+        "battery_v": 3.87,
+        "battery_pct_est": 62,
+        "readings": [
+            {
+                "timestamp": "2026-05-01T13:00:00Z",
+                "period_start": "2026-05-01T12:00:00Z",
+                "pulses": 42,
+            }
+        ],
+    }
+
+    with TestClient(app.main.app) as client:
+        for _ in range(3):
+            response = client.post(
+                "/api/meter-buddy/upload",
+                headers=auth_header(),
+                json=payload,
+            )
+            assert response.status_code == 201
+
+        delete_one = client.delete("/dumps/2")
+        assert delete_one.status_code == 200
+        assert delete_one.json() == {"ok": True, "deleted_id": 2}
+
+        assert client.get("/dumps/2.json").status_code == 404
+        assert client.get("/dumps/1.json").status_code == 200
+        assert client.get("/dumps/3.json").status_code == 200
+
+        delete_bulk = client.delete("/dumps?up_to_id=1")
+        assert delete_bulk.status_code == 200
+        assert delete_bulk.json() == {"ok": True, "deleted_count": 1}
+
+        assert client.get("/dumps/1.json").status_code == 404
+        assert client.get("/dumps/3.json").status_code == 200
+
+        missing = client.delete("/dumps/999")
+        assert missing.status_code == 404
+
+
 def test_websocket_receives_new_dump_notification(tmp_path, monkeypatch):
     monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
     monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")

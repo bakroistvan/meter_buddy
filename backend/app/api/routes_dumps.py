@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response, status
+from typing import Annotated
 
-from app.db import get_dump_json
+from fastapi import APIRouter, HTTPException, Query, Response, status
+
+from app.db import delete_dump, delete_dumps_up_to, get_dump_json
 
 router = APIRouter()
 
@@ -17,6 +19,21 @@ def preview_dump(dump_id: int) -> Response:
         content=raw_json,
         media_type="application/json",
     )
+
+
+@router.delete("/dumps")
+def delete_dumps_bulk(
+    up_to_id: Annotated[int, Query(ge=1, description="Delete all dumps with ID <= this value")],
+) -> dict[str, int | bool]:
+    deleted_count = delete_dumps_up_to(up_to_id)
+    return {"ok": True, "deleted_count": deleted_count}
+
+
+@router.delete("/dumps/{dump_id}")
+def delete_dump_route(dump_id: int) -> dict[str, int | bool]:
+    if not delete_dump(dump_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dump not found")
+    return {"ok": True, "deleted_id": dump_id}
 
 
 @router.get("/dumps/{dump_id}.json")

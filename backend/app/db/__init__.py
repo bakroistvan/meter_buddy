@@ -1,4 +1,6 @@
 from .repository import (
+    delete_dump,
+    delete_dumps_up_to,
     get_dump_json,
     get_dump_meta,
     init_db,
@@ -7,6 +9,8 @@ from .repository import (
 )
 
 __all__ = [
+    "delete_dump",
+    "delete_dumps_up_to",
     "get_dump_json",
     "get_dump_meta",
     "init_db",
