@@ -74,6 +74,53 @@
         word-break: break-all;
       }
 
+
+      .plot-panel {
+        margin: 1.5rem 0;
+        padding: 1rem;
+        background: white;
+        border: 1px solid #d9e2ec;
+      }
+
+      .plot-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.7rem;
+        align-items: end;
+      }
+
+      .plot-controls label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+      }
+
+      .plot-controls input {
+        width: 7rem;
+        padding: 0.45rem;
+        border: 1px solid #bcccdc;
+        border-radius: 4px;
+      }
+
+      .plot-controls button {
+        padding: 0.5rem 0.8rem;
+        cursor: pointer;
+      }
+
+      #plot-status {
+        min-height: 1.2rem;
+        margin: 0.8rem 0 0;
+        color: #52606d;
+      }
+
+      #readings-plot {
+        display: block;
+        width: 100%;
+        min-height: 320px;
+        margin-top: 0.8rem;
+      }
+
       .preview-row {
         display: none;
       }
@@ -86,6 +133,17 @@
   <body>
     <main>
       <h1>Meter Buddy Dumps</h1>
+
+      <section class="plot-panel">
+        <h2>Plot uploads</h2>
+        <div class="plot-controls">
+          <label>From upload ID <input id="plot-start-id" type="number" min="1"></label>
+          <label>To upload ID <input id="plot-end-id" type="number" min="1"></label>
+          <button id="plot-button" type="button">Plot range</button>
+        </div>
+        <p id="plot-status" role="status"></p>
+        <canvas id="readings-plot" aria-label="Meter readings plot"></canvas>
+      </section>
       <table id="dumps-table">
         <thead>
           <tr>
@@ -197,6 +255,131 @@
         });
       }
 
+
+      function plotReadings(readings) {
+        window.lastPlotReadings = readings;
+        var canvas = document.getElementById("readings-plot");
+        var width = canvas.clientWidth || 900;
+        var height = 480;
+        var scale = window.devicePixelRatio || 1;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        var ctx = canvas.getContext("2d");
+        ctx.scale(scale, scale);
+        ctx.clearRect(0, 0, width, height);
+
+        var left = 62;
+        var right = 18;
+        var top = 28;
+        var bottom = 42;
+        var gap = 54;
+        var panelHeight = (height - top - bottom - gap) / 2;
+        var plotWidth = width - left - right;
+        var minTime = readings[0].time;
+        var maxTime = readings[readings.length - 1].time;
+        if (minTime === maxTime) maxTime = minTime + 3600000;
+        var maxPulses = Math.max(1, Math.max.apply(null, readings.map(function (r) { return r.pulses; })));
+        var cumulative = 0;
+        readings.forEach(function (r) {
+          cumulative += r.pulses / r.impulsesPerKwh;
+          r.cumulativeKwh = cumulative;
+        });
+        var maxKwh = Math.max(0.001, cumulative);
+
+        function x(time) { return left + (time - minTime) / (maxTime - minTime) * plotWidth; }
+        function y(value, panelTop, max) { return panelTop + panelHeight - value / max * panelHeight; }
+        function drawPanel(panelTop, max, label, color, valueFn) {
+          ctx.strokeStyle = "#d9e2ec";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(left, panelTop);
+          ctx.lineTo(left, panelTop + panelHeight);
+          ctx.lineTo(width - right, panelTop + panelHeight);
+          ctx.stroke();
+          ctx.fillStyle = "#52606d";
+          ctx.font = "12px system-ui, sans-serif";
+          ctx.fillText(label, 8, panelTop + 12);
+          ctx.fillText("0", left - 22, panelTop + panelHeight + 4);
+          ctx.fillText(max.toFixed(2), left - 42, panelTop + 4);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          readings.forEach(function (r, i) {
+            var px = x(r.time);
+            var py = y(valueFn(r), panelTop, max);
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          });
+          ctx.stroke();
+          ctx.fillStyle = color;
+          readings.forEach(function (r) {
+            ctx.beginPath();
+            ctx.arc(x(r.time), y(valueFn(r), panelTop, max), 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+
+        drawPanel(top, maxPulses, "Pulses / period", "#1f6fb0", function (r) { return r.pulses; });
+        drawPanel(top + panelHeight + gap, maxKwh, "Cumulative kWh", "#2f855a", function (r) { return r.cumulativeKwh; });
+        ctx.fillStyle = "#52606d";
+        ctx.font = "11px system-ui, sans-serif";
+        [0, 0.5, 1].forEach(function (fraction) {
+          var time = minTime + (maxTime - minTime) * fraction;
+          var label = new Date(time).toISOString().replace("T", " ").slice(0, 16);
+          ctx.fillText(label, x(time) - 42, height - 12);
+        });
+      }
+
+      async function plotUploadRange() {
+        var start = Number(document.getElementById("plot-start-id").value);
+        var end = Number(document.getElementById("plot-end-id").value);
+        var status = document.getElementById("plot-status");
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start) {
+          status.textContent = "Enter a valid inclusive ID range.";
+          return;
+        }
+        if (end - start > 1000) {
+          status.textContent = "Please select at most 1000 upload IDs at a time.";
+          return;
+        }
+        status.textContent = "Loading uploads...";
+        try {
+          var responses = await Promise.all(Array.from({ length: end - start + 1 }, function (_, i) {
+            return fetch("/dumps/" + (start + i) + ".json");
+          }));
+          var uploads = [];
+          for (var i = 0; i < responses.length; i++) {
+            if (responses[i].ok) uploads.push(await responses[i].json());
+          }
+          var readings = [];
+          uploads.forEach(function (upload) {
+            var impulses = Number(upload.meter_impulses_per_kwh);
+            (upload.readings || []).forEach(function (reading) {
+              readings.push({
+                time: Date.parse(reading.timestamp),
+                pulses: Number(reading.pulses),
+                impulsesPerKwh: impulses
+              });
+            });
+          });
+          readings = readings.filter(function (r) {
+            return Number.isFinite(r.time) && Number.isFinite(r.pulses) && r.impulsesPerKwh > 0;
+          }).sort(function (a, b) { return a.time - b.time; });
+          if (!readings.length) {
+            status.textContent = "No readings found in that range.";
+            return;
+          }
+          plotReadings(readings);
+          status.textContent = "Plotted " + readings.length + " readings from " + uploads.length + " uploads.";
+        } catch (error) {
+          status.textContent = "Failed to load uploads: " + error.message;
+        }
+      }
+
+      document.getElementById("plot-button").addEventListener("click", plotUploadRange);
+      window.addEventListener("resize", function () {
+        if (window.lastPlotReadings) plotReadings(window.lastPlotReadings);
+      });
+
       function connectWs() {
         var proto = location.protocol === "https:" ? "wss:" : "ws:";
         var ws = new WebSocket(proto + "//" + location.host + "/ws");
@@ -215,6 +398,12 @@
       var initialDumps = {{ dumps | tojson | safe }};
       for (var i = initialDumps.length - 1; i >= 0; i--) {
         addDumpRow(initialDumps[i], false);
+      }
+
+      if (initialDumps.length) {
+        var ids = initialDumps.map(function (dump) { return dump.id; });
+        document.getElementById("plot-start-id").value = Math.min.apply(null, ids);
+        document.getElementById("plot-end-id").value = Math.max.apply(null, ids);
       }
 
       connectWs();
