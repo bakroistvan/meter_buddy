@@ -13,6 +13,8 @@ Wiring follows the pin assignments defined in `include/pins.h`.
 | D3       | 5    | DS3231 SQW/INT | Daily alarm wake, ext1 wake on LOW |
 | D4       | 6    | DS3231 SDA   | I2C data line |
 | D5       | 7    | DS3231 SCL   | I2C clock line |
+| D9       | 9    | Pulse LED anode via resistor | Short flash for each accepted pulse |
+| D10      | 10   | Status LED anode via resistor | Debug/status indication |
 | D0 / A0  | 2    | Battery divider midpoint | ADC, strapping pin — ensure floats HIGH at boot |
 | 3.3V     | —    | DS3231 VCC, TEMT6000 VCC | |
 | GND      | —    | Common ground | |

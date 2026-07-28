@@ -136,7 +136,6 @@ bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv) {
   ReadingRecord record{
       nextSequence,
       rtcCurrentPeriodStart,
-      timestamp,
       rtcCurrentPulses,
       batteryMv,
       0,

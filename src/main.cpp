@@ -25,6 +25,8 @@ RTC_DATA_ATTR uint32_t lastAcceptedPulseWakeUnix = 0;
 
 volatile uint32_t awakePulseCount = 0;
 volatile uint32_t lastPulseRiseMs = 0;
+volatile bool pulseDetected = false;
+volatile uint32_t pulseLedOffAtMs = 0;
 uint32_t lastAwakePulseFlushMs = 0;
 uint32_t lastWifiCheckMs = 0;
 bool awakePulseInterruptAttached = false;
@@ -38,6 +40,12 @@ void logLine(const char *message) {
 }
 
 uint32_t currentTimestamp();
+void flushAwakePulses(bool force = false);
+void singleBlink();
+void rapidErrorBlink();
+void servicePulseLed();
+String formatUtcTimestamp(uint32_t timestamp);
+String formatHumanUtcTimestamp(uint32_t timestamp);
 
 void logEvent(const char *event) {
   if (config::EnableSerialLogs) {
@@ -68,10 +76,10 @@ WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
     return WakeSource::None;
   }
 
-  const bool pulseHigh = digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH;
-  const bool rtcLow = digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW;
+  const bool pulseLow = digitalRead(pins::PulseWakePin) == LOW;
+  const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
 
-  if (pulseHigh) {
+  if (pulseLow) {
     return WakeSource::Pulse;
   }
   if (rtcLow) {
@@ -82,10 +90,43 @@ WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
 
 void configurePins() {
   pinMode(pins::UploadButtonPin, INPUT_PULLUP);
-  pinMode(static_cast<uint8_t>(pins::PulseWakePin), INPUT);
-  pinMode(static_cast<uint8_t>(pins::RtcWakePin), INPUT_PULLUP);
+  pinMode(pins::PulseWakePin, INPUT_PULLUP);
+  pinMode(pins::RtcWakePin, INPUT_PULLUP);
+  pinMode(pins::PulseLedPin, OUTPUT);
+  digitalWrite(pins::PulseLedPin, LOW);
   pinMode(pins::AwakeLedPin, OUTPUT);
-  digitalWrite(pins::AwakeLedPin, HIGH);
+  digitalWrite(pins::AwakeLedPin, LOW);
+}
+
+// GPIO deep-sleep wakeup is level-triggered on ESP32-C3. If we arm the upload
+// button while it is still held (or bouncing), sleep immediately re-wakes and
+// repeats the upload cycle for the duration of a long press.
+void waitForUploadButtonRelease() {
+  if (digitalRead(pins::UploadButtonPin) != LOW) {
+    return;
+  }
+
+  logEvent("waiting for upload button release before sleep");
+  while (true) {
+    while (digitalRead(pins::UploadButtonPin) == LOW) {
+      delay(10);
+    }
+
+    // Require a stable HIGH so contact bounce does not re-arm a wake.
+    const uint32_t releasedAt = millis();
+    bool bounced = false;
+    while (millis() - releasedAt < config::PulseDebounceMs) {
+      if (digitalRead(pins::UploadButtonPin) == LOW) {
+        bounced = true;
+        break;
+      }
+      delay(1);
+    }
+    if (!bounced) {
+      logEvent("upload button released");
+      return;
+    }
+  }
 }
 
 void enterDeepSleep() {
@@ -98,24 +139,26 @@ void enterDeepSleep() {
   }
 
   logEvent("entering deep sleep");
+  digitalWrite(pins::PulseLedPin, LOW);
   WiFi.mode(WIFI_OFF);
-  digitalWrite(pins::AwakeLedPin, LOW);
 
-  // Wait for pulse pin to go LOW so we don't immediately re-wake and
+  // Wait for pulse pin to go HIGH so we don't immediately re-wake and
   // double-count the same pulse (GPIO wakeup is level-triggered on ESP32-C3).
   {
     const uint32_t settleStart = millis();
-    while (digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH &&
+    while (digitalRead(pins::PulseWakePin) == LOW &&
            millis() - settleStart < config::PulseDebounceMs * 4) {
       delay(1);
     }
   }
 
+  waitForUploadButtonRelease();
+
   // Only GPIOs 0-5 support deep sleep wakeup on ESP32-C3. The upload button
   // on D1/GPIO3 is now included so a button press can wake the device.
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::UploadButtonWakePin), ESP_GPIO_WAKEUP_GPIO_LOW);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::RtcWakePin), ESP_GPIO_WAKEUP_GPIO_LOW);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << static_cast<uint32_t>(pins::PulseWakePin), ESP_GPIO_WAKEUP_GPIO_HIGH);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::UploadButtonPin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::RtcWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::PulseWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
 
   if (config::EnableSerialLogs) {
     Serial.flush();
@@ -136,6 +179,9 @@ void IRAM_ATTR onPulseRise() {
   if (now - lastPulseRiseMs >= config::PulseDebounceMs) {
     ++awakePulseCount;
     lastPulseRiseMs = now;
+    pulseDetected = true;
+    digitalWrite(pins::PulseLedPin, HIGH);
+    pulseLedOffAtMs = now + 100;
   }
 }
 
@@ -146,7 +192,7 @@ void attachAwakePulseInterrupt() {
 
   awakePulseCount = 0;
   lastPulseRiseMs = millis();
-  attachInterrupt(digitalPinToInterrupt(static_cast<uint8_t>(pins::PulseWakePin)), onPulseRise, RISING);
+  attachInterrupt(digitalPinToInterrupt(pins::PulseWakePin), onPulseRise, FALLING);
   awakePulseInterruptAttached = true;
   logEvent("pulse interrupt attached");
 }
@@ -156,7 +202,7 @@ void detachAwakePulseInterrupt() {
     return;
   }
 
-  detachInterrupt(digitalPinToInterrupt(static_cast<uint8_t>(pins::PulseWakePin)));
+  detachInterrupt(digitalPinToInterrupt(pins::PulseWakePin));
   awakePulseInterruptAttached = false;
   logEvent("pulse interrupt detached");
 }
@@ -171,15 +217,15 @@ bool sleepMakesSenseAfterPulse(uint32_t timestamp) {
 }
 
 bool isPulseRewake(uint32_t timestamp) {
-  const bool pulseStillHigh = digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH;
+  const bool pulseStillLow = digitalRead(pins::PulseWakePin) == LOW;
   const bool repeatedTimestamp = timestamp > 0 && lastPulseWakeUnix > 0 && timestamp <= lastPulseWakeUnix;
 
-  if (!pulseStillHigh) {
+  if (!pulseStillLow) {
     return false;
   }
 
   if (repeatedTimestamp) {
-    logEvent("pulse re-wake suppressed: pin still high");
+    logEvent("pulse re-wake suppressed: pin still low");
     return true;
   }
 
@@ -191,7 +237,7 @@ uint32_t countAwakeUntilQuiet() {
   lastPulseRiseMs = millis();
 
   const uint32_t settleStart = millis();
-  while (digitalRead(static_cast<uint8_t>(pins::PulseWakePin)) == HIGH &&
+  while (digitalRead(pins::PulseWakePin) == LOW &&
          millis() - settleStart < config::PulseDebounceMs * 4) {
     delay(1);
   }
@@ -203,6 +249,7 @@ uint32_t countAwakeUntilQuiet() {
   uint32_t quietSince = millis();
 
   while (millis() - started < config::PulseAwakeMaxMs) {
+    servicePulseLed();
     const uint32_t count = awakePulseCount;
     if (count != lastCount) {
       lastCount = count;
@@ -228,6 +275,10 @@ void handlePulseWake(uint32_t timestamp) {
     return;
   }
 
+  digitalWrite(pins::PulseLedPin, HIGH);
+  delay(100);
+  digitalWrite(pins::PulseLedPin, LOW);
+
   const bool sleepNow = sleepMakesSenseAfterPulse(timestamp);
   lastPulseWakeUnix = timestamp;
   lastAcceptedPulseWakeUnix = timestamp;
@@ -247,18 +298,17 @@ void handlePulseWake(uint32_t timestamp) {
 
 void handleRtcWake(uint32_t timestamp) {
   logEvent("rtc wake");
+  singleBlink();
   // Perform full RTC initialization including alarm cleanup for RTC wakes.
   rtc_clock::begin();
 
-  if (config::RtcWakeIntervalSeconds < 86400) {
-    digitalWrite(pins::AwakeLedPin, LOW);
-    delay(50);
-    digitalWrite(pins::AwakeLedPin, HIGH);
-  }
-
   const auto reading = battery::sample();
   if (config::EnableSerialLogs) {
-    Serial.printf("rtc roll battery=%.2fV pct=%u\n", reading.volts, reading.percent);
+    Serial.printf("rtc roll battery=%.2fV pct=%u timestamp=%lu (%s)\n",
+                  reading.volts,
+                  reading.percent,
+                  static_cast<unsigned long>(timestamp),
+                  formatUtcTimestamp(timestamp).c_str());
   }
   storage::rollCurrentPeriod(timestamp, static_cast<uint16_t>(reading.volts * 1000.0f));
   rtc_clock::scheduleNextWakeAlarm();
@@ -271,6 +321,10 @@ void handleUploadWake() {
     return;
   }
 
+  const bool pulseInterruptWasAttached = awakePulseInterruptAttached;
+  attachAwakePulseInterrupt();
+  digitalWrite(pins::PulseLedPin, HIGH);
+
   logEvent("pre-roll");
   storage::dump(Serial);
   storage::rollCurrentPeriod(currentTimestamp(),
@@ -278,29 +332,46 @@ void handleUploadWake() {
   logEvent("post-roll");
   storage::dump(Serial);
 
-  storage::UploadBatch batch{};
-  if (!storage::loadUploadBatch(batch)) {
-    logEvent("failed to load upload batch");
-    return;
-  }
-
   const auto reading = battery::sample();
-  if (config::EnableSerialLogs) {
-    Serial.printf("upload batch records=%u battery=%.2fV pct=%u\n",
-                  batch.count,
-                  reading.volts,
-                  reading.percent);
-  }
-  const auto result = upload::sendBatch(batch, reading);
-  if (config::EnableSerialLogs) {
-    Serial.printf("upload result=%s records=%u\n", upload::resultName(result), batch.count);
-  }
+  bool uploadSucceeded = true;
+  bool uploadedRecords = false;
+  while (true) {
+    storage::UploadBatch batch{};
+    if (!storage::loadUploadBatch(batch)) {
+      logEvent("failed to load upload batch");
+      uploadSucceeded = false;
+      break;
+    }
+    if (batch.count == 0) break;
+    uploadedRecords = true;
 
-  if (result == upload::Result::Success) {
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload batch records=%u battery=%.2fV pct=%u\n",
+                    batch.count, reading.volts, reading.percent);
+    }
+    const auto result = upload::sendBatch(batch, reading);
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload result=%s records=%u\n", upload::resultName(result), batch.count);
+    }
+    if (result != upload::Result::Success) {
+      uploadSucceeded = false;
+      break;
+    }
     storage::markSyncedThrough(batch.newestSequence);
     logEvent("upload marked records synced");
-    upload::checkFirmwareUpdate();
   }
+
+  flushAwakePulses(true);
+  if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
+  if (uploadSucceeded) {
+    digitalWrite(pins::PulseLedPin, LOW);
+    if (uploadedRecords) {
+      upload::checkFirmwareUpdate();
+    }
+  } else {
+    rapidErrorBlink();
+  }
+
 }
 
 void handleDiagnosticsBoot() {
@@ -309,33 +380,103 @@ void handleDiagnosticsBoot() {
   const auto reading = battery::sample();
   Serial.printf("battery=%.2fV pct=%u\n", reading.volts, reading.percent);
 
-  Serial.println("Diagnostics REPL. Commands: dump, clear, status, reboot");
+  Serial.println("Diagnostics REPL. Commands: dump, clear, status, t[ime], upload, reboot");
+  String cmd = "";
+  static bool uploadWasLow = false;
+  static bool rtcWasLow = false;
   while (true) {
+    servicePulseLed();
+    if (pulseDetected) {
+      pulseDetected = false;
+      noInterrupts();
+      const uint32_t count = awakePulseCount;
+      interrupts();
+      char buf[64];
+      snprintf(buf, sizeof(buf), "pulse detected count=%lu", static_cast<unsigned long>(count));
+      logEvent(buf);
+    }
+
+    flushAwakePulses();
+
+    const bool uploadLow = digitalRead(pins::UploadButtonPin) == LOW;
+    if (uploadLow && !uploadWasLow) {
+      logEvent("upload button detected");
+      handleUploadWake();
+    }
+    uploadWasLow = uploadLow;
+
+    const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
+    if (rtcLow && !rtcWasLow) {
+      logEvent("rtc interrupt detected");
+      handleRtcWake(currentTimestamp());
+    }
+    rtcWasLow = rtcLow;
+
     if (Serial.available()) {
-      String cmd = Serial.readStringUntil('\n');
-      cmd.trim();
-      if (cmd == "dump") {
-        storage::dump(Serial);
-      } else if (cmd == "clear") {
-        storage::clear();
-        Serial.println("storage cleared");
-      } else if (cmd == "status") {
-        const auto r = battery::sample();
-        Serial.printf("battery=%.2fV pct=%u wifi=%s\n", r.volts, r.percent, WiFi.status() == WL_CONNECTED ? "connected" : "disconnected");
-      } else if (cmd == "reboot") {
-        ESP.restart();
-      } else if (cmd.length() > 0) {
-        Serial.println("unknown command");
+      const char c = Serial.read();
+      if (c == '\n' || c == '\r') {
+        cmd.trim();
+        Serial.println();
+        if (cmd.length() > 0) {
+          const char first = cmd.charAt(0);
+          if (cmd == "t" || cmd == "time") {
+            Serial.printf("current time: %s\n",
+                          formatHumanUtcTimestamp(currentTimestamp()).c_str());
+          } else if (first == 'd') {
+            storage::dump(Serial);
+          } else if (first == 'c') {
+            storage::clear();
+            Serial.println("storage cleared");
+          } else if (first == 's') {
+            const auto r = battery::sample();
+            const bool pulseLow = digitalRead(pins::PulseWakePin) == LOW;
+            const uint32_t now = currentTimestamp();
+            const uint32_t nextAlarm = rtcClockAvailable ? rtc_clock::getNextAlarmUnix() : 0;
+
+            time_t raw = now;
+            tm timeinfo{};
+            gmtime_r(&raw, &timeinfo);
+            char nowIso[25];
+            strftime(nowIso, sizeof(nowIso), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+
+            String nextAlarmIso = nextAlarm > 0 ? String("") : String("none");
+            if (nextAlarm > 0) {
+              time_t rawNext = nextAlarm;
+              tm timeinfoNext{};
+              gmtime_r(&rawNext, &timeinfoNext);
+              char nextAlarmBuf[25];
+              strftime(nextAlarmBuf, sizeof(nextAlarmBuf), "%Y-%m-%dT%H:%M:%SZ", &timeinfoNext);
+              nextAlarmIso = String(nextAlarmBuf);
+            }
+
+            Serial.printf("battery=%.2fV pct=%u wifi=%s pulse=%s count=%lu\n",
+                          r.volts, r.percent,
+                          WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
+                          pulseLow ? "LOW" : "HIGH",
+                          static_cast<unsigned long>(awakePulseCount));
+            Serial.printf("inputs upload=%s pulse=%s rtc=%s pulse_led=%s awake_led=%s\n",
+                          digitalRead(pins::UploadButtonPin) == LOW ? "LOW" : "HIGH",
+                          digitalRead(pins::PulseWakePin) == LOW ? "LOW" : "HIGH",
+                          digitalRead(pins::RtcWakePin) == LOW ? "LOW" : "HIGH",
+                          digitalRead(pins::PulseLedPin) == HIGH ? "HIGH" : "LOW",
+                          digitalRead(pins::AwakeLedPin) == HIGH ? "HIGH" : "LOW");
+            Serial.printf("time=%s next_alarm=%s\n", nowIso, nextAlarmIso.c_str());
+          } else if (first == 'u') {
+            logEvent("upload triggered");
+            handleUploadWake();
+          } else if (first == 'r') {
+            ESP.restart();
+          } else {
+            Serial.println("unknown command");
+          }
+        }
+        cmd = "";
+      } else {
+        Serial.write(c);
+        cmd += c;
       }
     }
-    
-    // flash LED to indicate alive in diagnostics
-    static uint32_t lastLed = 0;
-    if (millis() - lastLed > 1000) {
-      lastLed = millis();
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-    }
-    
+
     delay(10);
   }
 }
@@ -347,8 +488,56 @@ uint32_t currentTimestamp() {
   return millis() / 1000UL;
 }
 
-void flushAwakePulses() {
-  if (config::EnableDeepSleep || millis() - lastAwakePulseFlushMs < config::AwakePulseFlushMs) {
+void rapidErrorBlink() {
+  for (uint8_t i = 0; i < 10; ++i) {
+    digitalWrite(pins::PulseLedPin, HIGH); delay(100);
+    digitalWrite(pins::PulseLedPin, LOW); delay(100);
+  }
+}
+
+void singleBlink() {
+  digitalWrite(pins::AwakeLedPin, HIGH);
+  delay(100);
+  digitalWrite(pins::AwakeLedPin, LOW);
+}
+
+void doubleBlink() {
+  digitalWrite(pins::AwakeLedPin, HIGH);
+  delay(100);
+  digitalWrite(pins::AwakeLedPin, LOW);
+  delay(100);
+  digitalWrite(pins::AwakeLedPin, HIGH);
+  delay(100);
+  digitalWrite(pins::AwakeLedPin, LOW);
+}
+
+void servicePulseLed() {
+  if (digitalRead(pins::PulseLedPin) == HIGH &&
+      static_cast<int32_t>(millis() - pulseLedOffAtMs) >= 0) {
+    digitalWrite(pins::PulseLedPin, LOW);
+  }
+}
+
+String formatUtcTimestamp(uint32_t timestamp) {
+  time_t raw = timestamp;
+  tm timeinfo{};
+  gmtime_r(&raw, &timeinfo);
+  char buf[25];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  return String(buf);
+}
+
+String formatHumanUtcTimestamp(uint32_t timestamp) {
+  time_t raw = timestamp;
+  tm timeinfo{};
+  gmtime_r(&raw, &timeinfo);
+  char buf[32];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S UTC", &timeinfo);
+  return String(buf);
+}
+
+void flushAwakePulses(bool force) {
+  if (!force && millis() - lastAwakePulseFlushMs < config::AwakePulseFlushMs) {
     return;
   }
 
@@ -364,9 +553,10 @@ void flushAwakePulses() {
 
   const uint32_t timestamp = currentTimestamp();
   if (storage::addPulses(timestamp, pulses) && config::EnableSerialLogs) {
-    Serial.printf("awake pulse flush count=%lu timestamp=%lu\n",
+    Serial.printf("awake pulse flush count=%lu timestamp=%lu (%s)\n",
                   static_cast<unsigned long>(pulses),
-                  static_cast<unsigned long>(timestamp));
+                  static_cast<unsigned long>(timestamp),
+                  formatUtcTimestamp(timestamp).c_str());
   }
 }
 
@@ -393,8 +583,9 @@ void pollAwakeControls() {
   }
   uploadWasPressed = uploadPressed;
 
-  const bool rtcLow = digitalRead(static_cast<uint8_t>(pins::RtcWakePin)) == LOW;
+  const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
   if (rtcLow && !rtcWasLow) {
+    logEvent("rtc interrupt detected");
     handleRtcWake(currentTimestamp());
   }
   rtcWasLow = rtcLow;
@@ -467,8 +658,7 @@ void setup() {
     return;
   }
 
-  // Run the boot diagnostics and schedule the next wake alarm.
-  handleDiagnosticsBoot();
+  // Schedule the next wake alarm.
   if (rtcClockAvailable) {
     rtc_clock::scheduleNextWakeAlarm();
   }
@@ -479,17 +669,29 @@ void setup() {
     return;
   }
 
-  // Keep the device awake and listening for pulses when deep sleep is disabled.
-  if (!config::EnableDeepSleep) {
-    attachAwakePulseInterrupt();
-    if (config::KeepWifiConnectedWhenAwake) {
-      upload::ensureWifiConnected();
-      upload::syncRtcFromNetwork();
-    }
+  // Keep the device awake and listening for pulses when staying awake.
+  attachAwakePulseInterrupt();
+  if (config::KeepWifiConnectedWhenAwake) {
+    upload::ensureWifiConnected();
+    upload::syncRtcFromNetwork();
   }
+
+  // Run the boot diagnostics.
+  handleDiagnosticsBoot();
 }
 
 void loop() {
+  servicePulseLed();
+  if (pulseDetected) {
+    pulseDetected = false;
+    noInterrupts();
+    const uint32_t count = awakePulseCount;
+    interrupts();
+    char buf[64];
+    snprintf(buf, sizeof(buf), "pulse detected count=%lu", static_cast<unsigned long>(count));
+    logEvent(buf);
+  }
+
   if (!config::EnableDeepSleep) {
     flushAwakePulses();
     pollAwakeControls();

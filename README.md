@@ -32,6 +32,8 @@ See [docs/README.md](docs/README.md) for the full documentation index and [docs/
 | RTC wake | D3 | GPIO5 | DS3231 SQW/INT, active low |
 | I2C SDA | D4 | GPIO6 | DS3231 + AT24C32 |
 | I2C SCL | D5 | GPIO7 | DS3231 + AT24C32 |
+| Pulse LED | D9 | GPIO9 | Dedicated short flash for each accepted pulse |
+| Status LED | D10 | GPIO10 | Debug/status blink patterns |
 
 ## Configuration
 

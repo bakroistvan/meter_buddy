@@ -11,5 +11,6 @@ uint32_t nowUnix();
 bool adjustUnix(uint32_t timestamp);
 bool clearAlarm();
 bool scheduleNextWakeAlarm();
+uint32_t getNextAlarmUnix();
 
 } // namespace rtc_clock

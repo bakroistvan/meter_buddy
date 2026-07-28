@@ -1,4 +1,4 @@
-﻿# meter_buddy — Technical Specification & Implementation Plan
+# meter_buddy — Technical Specification & Implementation Plan
 
 This document translates the high-level design goals from [intent.md](intent.md) into a concrete technical specification and implementation plan, incorporating the proposed unified storage architecture (LittleFS) and OTA update capabilities.
 
@@ -16,6 +16,7 @@ The device targets the ESP32-C3 microcontroller (Seeed Studio XIAO ESP32C3) with
 - **D4 (GPIO6)**: I2cSdaPin — I2C SDA (for RTC).
 - **D5 (GPIO7)**: I2cSclPin — I2C SCL (for RTC).
 - **D1 (GPIO3)**: UploadButtonPin — User button (active LOW, internal pull-up, deep-sleep wake capable).
+- **D9 (GPIO9)**: PulseLedPin — Dedicated pulse indicator LED, flashed briefly for each accepted pulse.
 - **D10 (GPIO10)**: AwakeLedPin — Debug/status LED.
 
 *Note: The external AT24C32 EEPROM chip on the I2C bus will be deprecated and removed from the BOM in favor of internal flash storage.*

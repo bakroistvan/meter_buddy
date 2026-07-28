@@ -41,8 +41,9 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading &batt
     if (i > 0) {
       body += ',';
     }
+    const uint32_t periodEnd = record.periodStart + config::RtcWakeIntervalSeconds;
     body += "{\"timestamp\":\"";
-    body += iso8601(record.periodEnd);
+    body += iso8601(periodEnd);
     body += "\",\"period_start\":\"";
     body += iso8601(record.periodStart);
     body += "\",\"pulses\":";

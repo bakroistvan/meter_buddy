@@ -170,17 +170,16 @@ Deep Sleep ──┬──► Pulse (GPIO4 HIGH) ──► handlePulseWake()
 
 ### Key Data Types
 
-**`storage::ReadingRecord`** (packed, 22 bytes):
+**`storage::ReadingRecord`** (packed, 18 bytes):
 
 | Offset | Size | Field |
 |--------|------|-------|
 | 0 | 4 | `sequence` — monotonic ID |
 | 4 | 4 | `periodStart` — unix timestamp |
-| 8 | 4 | `periodEnd` — unix timestamp |
-| 12 | 4 | `pulses` — pulse count in this period |
-| 16 | 2 | `batteryMv` — end-of-period mV / 1000 |
-| 18 | 2 | `flags` — reserved |
-| 20 | 2 | `crc` — CRC-16 over preceding 20 bytes |
+| 8 | 4 | `pulses` — pulse count in this period |
+| 12 | 2 | `batteryMv` — end-of-period mV / 1000 |
+| 14 | 2 | `flags` — reserved |
+| 16 | 2 | `crc` — CRC-16 over preceding 16 bytes |
 
 **`storage::UploadBatch`**: up to 48 records + count + newestSequence.
 
@@ -193,9 +192,9 @@ Deep Sleep ──┬──► Pulse (GPIO4 HIGH) ──► handlePulseWake()
 | Address | Content |
 |---------|---------|
 | 0 – 63 | Header (magic=`0x4D425544 "MBUD"`, version=1, nextSequence, syncedThrough, currentPeriodStart, currentPulses, crc) |
-| 64 – 4095 | Ring-buffer of `ReadingRecord`, 22 bytes each, ~183 slots |
+| 64 – 4095 | Ring-buffer of `ReadingRecord`, 18 bytes each, ~224 slots |
 
-Records wrap at `(4096 - 64) / 22 = 183` slots. Header tracks `nextSequence` for the next record ID and `syncedThrough` for the highest sequence confirmed uploaded.
+Records wrap at `(4096 - 64) / 18 = 224` slots. Header tracks `nextSequence` for the next record ID and `syncedThrough` for the highest sequence confirmed uploaded.
 
 ### CRC-16
 

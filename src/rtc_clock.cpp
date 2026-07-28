@@ -63,9 +63,28 @@ bool scheduleNextWakeAlarm() {
   DateTime next(now.unixtime() + intervalSec);
   rtc.disableAlarm(1);
   rtc.disableAlarm(2);
-  
+
   // Match hours, minutes, and seconds. Safe for intervals < 24 hours.
   return rtc.setAlarm1(next, DS3231_A1_Hour);
+}
+
+uint32_t getNextAlarmUnix() {
+  if (!initialized) {
+    return 0;
+  }
+
+  // Read the programmed Alarm 1 registers. Alarm 1 is configured in
+  // scheduleNextWakeAlarm() as a daily hour/minute/second alarm, so the
+  // date stored by getAlarm1() is only a placeholder from the DS3231.
+  const DateTime now = rtc.now();
+  const DateTime alarm = rtc.getAlarm1();
+  DateTime next(now.year(), now.month(), now.day(),
+                alarm.hour(), alarm.minute(), alarm.second());
+
+  if (next.unixtime() <= now.unixtime()) {
+    next = DateTime(next.unixtime() + 24UL * 60UL * 60UL);
+  }
+  return next.unixtime();
 }
 
 } // namespace rtc_clock
