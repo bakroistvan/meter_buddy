@@ -242,12 +242,12 @@
     <script>
       function batteryCell(dump) {
         var html = "";
-        if (dump.battery_v !== null) {
+        if (dump.battery_v != null) {
           html += dump.battery_v.toFixed(2) + " V";
         } else {
           html += "n/a";
         }
-        if (dump.battery_pct_est !== null) {
+        if (dump.battery_pct_est != null) {
           html += " (" + dump.battery_pct_est + "%)";
         }
         return html;

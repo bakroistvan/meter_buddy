@@ -143,14 +143,16 @@ def list_dumps() -> list[sqlite3.Row]:
             conn.execute(
                 """
                 SELECT
-                  id,
-                  received_at,
-                  device_id,
-                  meter_impulses_per_kwh,
-                  upload_trigger,
-                  reading_count
-                FROM upload_dumps
-                ORDER BY received_at DESC, id DESC
+                  d.id,
+                  d.received_at,
+                  d.device_id,
+                  d.meter_impulses_per_kwh,
+                  d.upload_trigger,
+                  d.reading_count,
+                  (SELECT r.battery_v FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_v,
+                  (SELECT r.battery_pct_est FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_pct_est
+                FROM upload_dumps d
+                ORDER BY d.received_at DESC, d.id DESC
                 """
             )
         )
@@ -160,9 +162,16 @@ def get_dump_meta(dump_id: int) -> dict | None:
     with connection() as conn:
         row = conn.execute(
             """
-            SELECT id, received_at, device_id, meter_impulses_per_kwh,
-                   upload_trigger, reading_count
-            FROM upload_dumps WHERE id = ?
+            SELECT
+              d.id,
+              d.received_at,
+              d.device_id,
+              d.meter_impulses_per_kwh,
+              d.upload_trigger,
+              d.reading_count,
+              (SELECT r.battery_v FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_v,
+              (SELECT r.battery_pct_est FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_pct_est
+            FROM upload_dumps d WHERE d.id = ?
             """,
             (dump_id,),
         ).fetchone()
