@@ -210,6 +210,7 @@
       .telemetry-item {
         display: flex;
         align-items: center;
+        white-space: nowrap;
       }
 
       .telemetry-item .label {
@@ -220,7 +221,29 @@
       .telemetry-item .val {
         font-weight: 600;
         color: #38bdf8;
+        font-variant-numeric: tabular-nums;
+        display: inline-block;
+        text-align: right;
       }
+
+      .telemetry-item .unit {
+        color: #94a3b8;
+        margin-left: 0.25rem;
+        font-weight: 400;
+      }
+
+      .num-time { width: 165px; text-align: left; }
+      .num-pulses { width: 42px; }
+      .num-power { width: 62px; }
+      .num-kwh { width: 68px; }
+      .num-batt-v { width: 44px; }
+      .num-batt-pct { width: 32px; margin-left: 0.35rem; }
+
+      .item-time { width: 235px; }
+      .item-pulses { width: 120px; }
+      .item-power { width: 155px; }
+      .item-kwh { width: 185px; }
+      .item-batt { width: 185px; }
 
       .preview-row {
         display: none;
@@ -244,11 +267,11 @@
         </div>
         <p id="plot-status" role="status"></p>
         <div id="plot-telemetry" class="plot-telemetry" style="display: none;">
-          <div class="telemetry-item"><span class="label">TIME:</span> <span id="telemetry-time" class="val">-</span></div>
-          <div class="telemetry-item"><span class="label">PULSES:</span> <span id="telemetry-pulses" class="val">-</span></div>
-          <div class="telemetry-item"><span class="label">EST POWER:</span> <span id="telemetry-power" class="val">-</span></div>
-          <div class="telemetry-item"><span class="label">CUMULATIVE:</span> <span id="telemetry-kwh" class="val">-</span></div>
-          <div class="telemetry-item"><span class="label">BATTERY:</span> <span id="telemetry-batt" class="val">-</span></div>
+          <div class="telemetry-item item-time"><span class="label">TIME:</span> <span id="telemetry-time" class="val">-</span></div>
+          <div class="telemetry-item item-pulses"><span class="label">PULSES:</span> <span id="telemetry-pulses" class="val">-</span></div>
+          <div class="telemetry-item item-power"><span class="label">EST POWER:</span> <span id="telemetry-power" class="val">-</span></div>
+          <div class="telemetry-item item-kwh"><span class="label">CUMULATIVE:</span> <span id="telemetry-kwh" class="val">-</span></div>
+          <div class="telemetry-item item-batt"><span class="label">BATTERY:</span> <span id="telemetry-batt" class="val">-</span></div>
         </div>
         <canvas id="readings-plot" aria-label="Meter readings plot"></canvas>
       </section>
@@ -705,7 +728,7 @@
           telemetryEl.style.display = "flex";
           document.getElementById("telemetry-time").textContent = new Date(closest.time).toISOString().replace("T", " ").slice(0, 19) + " UTC";
           document.getElementById("telemetry-pulses").textContent = closest.pulses + " cnt";
-          document.getElementById("telemetry-power").textContent = Number.isFinite(closest.powerW) ? closest.powerW.toFixed(1) + " W (" + closest.powerKw.toFixed(3) + " kW)" : "n/a";
+          document.getElementById("telemetry-power").textContent = Number.isFinite(closest.powerW) ? closest.powerW.toFixed(1) + " W" : "n/a";
           document.getElementById("telemetry-kwh").textContent = closest.cumulativeKwh.toFixed(3) + " kWh";
           document.getElementById("telemetry-batt").textContent = closest.battery_v != null ? closest.battery_v.toFixed(2) + " V" + (closest.battery_pct_est != null ? " (" + closest.battery_pct_est + "%)" : "") : "n/a";
 
