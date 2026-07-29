@@ -10,6 +10,7 @@
 #include "rtc_clock.h"
 #include "storage.h"
 #include "upload.h"
+#include "awake_led.h"
 
 namespace {
 
@@ -33,6 +34,8 @@ bool awakePulseInterruptAttached = false;
 bool rtcClockAvailable = false;
 bool storageAvailable = false;
 
+AwakeLed awakeLed;
+
 void logLine(const char *message) {
   if (config::EnableSerialLogs) {
     Serial.println(message);
@@ -41,8 +44,6 @@ void logLine(const char *message) {
 
 uint32_t currentTimestamp();
 void flushAwakePulses(bool force = false);
-void singleBlink();
-void rapidErrorBlink();
 void servicePulseLed();
 String formatUtcTimestamp(uint32_t timestamp);
 String formatHumanUtcTimestamp(uint32_t timestamp);
@@ -94,8 +95,7 @@ void configurePins() {
   pinMode(pins::RtcWakePin, INPUT_PULLUP);
   pinMode(pins::PulseLedPin, OUTPUT);
   digitalWrite(pins::PulseLedPin, LOW);
-  pinMode(pins::AwakeLedPin, OUTPUT);
-  digitalWrite(pins::AwakeLedPin, LOW);
+  awakeLed.init();
 }
 
 // GPIO deep-sleep wakeup is level-triggered on ESP32-C3. If we arm the upload
@@ -140,6 +140,7 @@ void enterDeepSleep() {
 
   logEvent("entering deep sleep");
   digitalWrite(pins::PulseLedPin, LOW);
+  awakeLed.setSleep();
   WiFi.mode(WIFI_OFF);
 
   // Wait for pulse pin to go HIGH so we don't immediately re-wake and
@@ -298,7 +299,7 @@ void handlePulseWake(uint32_t timestamp) {
 
 void handleRtcWake(uint32_t timestamp) {
   logEvent("rtc wake");
-  singleBlink();
+  awakeLed.blink();
   // Perform full RTC initialization including alarm cleanup for RTC wakes.
   rtc_clock::begin();
 
@@ -323,7 +324,7 @@ void handleUploadWake() {
 
   const bool pulseInterruptWasAttached = awakePulseInterruptAttached;
   attachAwakePulseInterrupt();
-  digitalWrite(pins::AwakeLedPin, HIGH);
+  awakeLed.setOn();
 
   logEvent("pre-roll");
   storage::dump(Serial);
@@ -364,12 +365,12 @@ void handleUploadWake() {
   flushAwakePulses(true);
   if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
   if (uploadSucceeded) {
-    digitalWrite(pins::AwakeLedPin, LOW);
+    awakeLed.setOff();
     if (uploadedRecords) {
       upload::checkFirmwareUpdate();
     }
   } else {
-    rapidErrorBlink();
+    awakeLed.rapidErrorBlink();
   }
 
 }
@@ -459,7 +460,7 @@ void handleDiagnosticsBoot() {
                           digitalRead(pins::PulseWakePin) == LOW ? "LOW" : "HIGH",
                           digitalRead(pins::RtcWakePin) == LOW ? "LOW" : "HIGH",
                           digitalRead(pins::PulseLedPin) == HIGH ? "HIGH" : "LOW",
-                          digitalRead(pins::AwakeLedPin) == HIGH ? "HIGH" : "LOW");
+                          awakeLed.isOn() ? "HIGH" : "LOW");
             Serial.printf("time=%s next_alarm=%s\n", nowIso, nextAlarmIso.c_str());
           } else if (first == 'u') {
             logEvent("upload triggered");
@@ -486,29 +487,6 @@ uint32_t currentTimestamp() {
     return rtc_clock::nowUnix();
   }
   return millis() / 1000UL;
-}
-
-void rapidErrorBlink() {
-  for (uint8_t i = 0; i < 10; ++i) {
-    digitalWrite(pins::AwakeLedPin, HIGH); delay(100);
-    digitalWrite(pins::AwakeLedPin, LOW); delay(100);
-  }
-}
-
-void singleBlink() {
-  digitalWrite(pins::AwakeLedPin, HIGH);
-  delay(100);
-  digitalWrite(pins::AwakeLedPin, LOW);
-}
-
-void doubleBlink() {
-  digitalWrite(pins::AwakeLedPin, HIGH);
-  delay(100);
-  digitalWrite(pins::AwakeLedPin, LOW);
-  delay(100);
-  digitalWrite(pins::AwakeLedPin, HIGH);
-  delay(100);
-  digitalWrite(pins::AwakeLedPin, LOW);
 }
 
 void servicePulseLed() {
@@ -605,6 +583,10 @@ void setup() {
 
   // Configure the GPIO pins used for wake sources, buttons, and LED status.
   configurePins();
+  // Turn on awake LED if deep sleep is enabled
+  if (config::EnableDeepSleep) {
+    awakeLed.setAwake();
+  }
   // Initialize the I2C bus for attached peripherals.
   Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
   // Initialize battery monitoring so the device can report power state.
