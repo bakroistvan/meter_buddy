@@ -9,7 +9,7 @@ constexpr uint8_t MaxUploadRecords = 48;
 struct __attribute__((packed)) ReadingRecord {
   uint32_t sequence;
   uint32_t periodStart;
-  uint32_t pulses;
+  uint16_t pulses;
   uint16_t batteryMv;
   uint16_t flags;
   uint16_t crc;

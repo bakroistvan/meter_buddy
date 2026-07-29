@@ -12,7 +12,7 @@ from pathlib import Path
 
 FILE_HEADER = re.compile(r"^(?P<path>/\S+) \((?P<size>\d+) bytes\):$")
 HEX_LINE = re.compile(r"^\s*[0-9a-fA-F]{8}\s+(?P<hex>(?:[0-9a-fA-F]{2}\s+){1,16})\|")
-RECORD = struct.Struct("<IIIIHHH")
+RECORD = struct.Struct("<IIHHHH")
 
 
 def crc16(data: bytes) -> int:
@@ -60,16 +60,16 @@ def decode_records(data: bytes) -> None:
 
     count = len(data) // RECORD.size
     print(f"records: {count} complete record(s), {len(data)} decoded bytes")
-    print("seq  start                    end                      pulses  battery  flags  crc")
-    print("---  -----------------------  -----------------------  ------  -------  -----  ---")
+    print("seq  period_start              pulses  battery  flags  crc")
+    print("---  -----------------------  ------  -------  -----  ---")
 
     for index in range(count):
         raw = data[index * RECORD.size : (index + 1) * RECORD.size]
-        sequence, start, end, pulses, battery_mv, flags, stored_crc = RECORD.unpack(raw)
+        sequence, period_start, pulses, battery_mv, flags, stored_crc = RECORD.unpack(raw)
         calculated_crc = crc16(raw[:-2])
         crc_state = "OK" if stored_crc == calculated_crc else f"BAD ({calculated_crc:04x})"
         print(
-            f"{sequence:3d}  {utc(start):23s}  {utc(end):23s}  "
+            f"{sequence:3d}  {utc(period_start):23s}  "
             f"{pulses:6d}  {battery_mv:7d}  {flags:5d}  {crc_state}"
         )
 

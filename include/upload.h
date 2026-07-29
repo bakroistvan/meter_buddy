@@ -1,6 +1,5 @@
 #pragma once
 
-#include "battery.h"
 #include "storage.h"
 
 namespace upload {
@@ -15,7 +14,7 @@ enum class Result {
 
 bool ensureWifiConnected();
 bool syncRtcFromNetwork();
-Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading);
+Result sendBatch(const storage::UploadBatch &batch);
 const char *resultName(Result result);
 void checkFirmwareUpdate();
 

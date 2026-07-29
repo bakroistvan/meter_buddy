@@ -10,7 +10,7 @@ namespace {
 bool initialized = false;
 
 RTC_DATA_ATTR uint32_t rtcCurrentPeriodStart = 0;
-RTC_DATA_ATTR uint32_t rtcCurrentPulses = 0;
+RTC_DATA_ATTR uint16_t rtcCurrentPulses = 0;
 
 uint32_t nextSequence = 1;
 uint32_t syncedThrough = 0;
@@ -72,6 +72,57 @@ void loadNextSequence() {
   file.close();
 }
 
+void hexdumpFile(Stream &stream, const char *path) {
+  File file = LittleFS.open(path, FILE_READ);
+  if (!file) {
+    return;
+  }
+
+  const size_t size = file.size();
+  stream.printf("%s (%u bytes):\n", path, static_cast<unsigned>(size));
+
+  size_t offset = 0;
+  uint8_t buf[16];
+  while (file.available()) {
+    const size_t n = file.read(buf, sizeof(buf));
+    if (n == 0) {
+      break;
+    }
+
+    stream.printf("%08x  ", static_cast<unsigned>(offset));
+
+    size_t hexLen = 0;
+    for (size_t i = 0; i < n; ++i) {
+      if (i > 0) {
+        stream.print(' ');
+        ++hexLen;
+      }
+      stream.printf("%02x", buf[i]);
+      hexLen += 2;
+    }
+
+    constexpr size_t hexWidth = 47;
+    while (hexLen < hexWidth) {
+      stream.print(' ');
+      ++hexLen;
+    }
+
+    stream.print("  |");
+    for (size_t i = 0; i < n; ++i) {
+      const char c = static_cast<char>(buf[i]);
+      stream.print((c >= 32 && c <= 126) ? c : '.');
+    }
+    for (size_t i = n; i < 16; ++i) {
+      stream.print(' ');
+    }
+    stream.println("|");
+
+    offset += n;
+  }
+
+  file.close();
+}
+
 void compactRecords() {
   File file = LittleFS.open(RecordsFile, FILE_READ);
   if (!file) return;
@@ -120,7 +171,8 @@ bool addPulses(uint32_t timestamp, uint32_t count) {
   if (rtcCurrentPeriodStart == 0) {
     rtcCurrentPeriodStart = timestamp;
   }
-  rtcCurrentPulses += count;
+  const uint32_t next = static_cast<uint32_t>(rtcCurrentPulses) + count;
+  rtcCurrentPulses = next > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(next);
   return true;
 }
 
@@ -202,12 +254,8 @@ void dump(Stream &stream) {
     stream.println("storage unavailable");
     return;
   }
-  stream.printf("storage next=%lu synced=%lu rtc_start=%lu rtc_pulses=%lu unsynced=%lu\n",
-                static_cast<unsigned long>(nextSequence),
-                static_cast<unsigned long>(syncedThrough),
-                static_cast<unsigned long>(rtcCurrentPeriodStart),
-                static_cast<unsigned long>(rtcCurrentPulses),
-                static_cast<unsigned long>(unsyncedCount()));
+  hexdumpFile(stream, RecordsFile);
+  hexdumpFile(stream, SyncFile);
 }
 
 void clear() {

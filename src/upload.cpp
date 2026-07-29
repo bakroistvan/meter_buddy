@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "config.h"
+#include "battery.h"
 #include "rtc_clock.h"
 
 namespace upload {
@@ -23,18 +24,14 @@ String iso8601(uint32_t unixTime) {
   return String(out);
 }
 
-String buildBody(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
+String buildBody(const storage::UploadBatch &batch) {
   String body;
-  body.reserve(384 + batch.count * 96);
+  body.reserve(384 + batch.count * 120);
   body += "{\"device_id\":\"";
   body += config::DeviceId;
   body += "\",\"meter_impulses_per_kwh\":";
   body += config::MeterImpulsesPerKwh;
-  body += ",\"upload_trigger\":\"button\",\"battery_v\":";
-  body += String(batteryReading.volts, 2);
-  body += ",\"battery_pct_est\":";
-  body += String(batteryReading.percent);
-  body += ",\"readings\":[";
+  body += ",\"upload_trigger\":\"button\",\"readings\":[";
 
   for (uint8_t i = 0; i < batch.count; ++i) {
     const auto &record = batch.records[i];
@@ -42,12 +39,18 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading &batt
       body += ',';
     }
     const uint32_t periodEnd = record.periodStart + config::RtcWakeIntervalSeconds;
+    const float volts = record.batteryMv / 1000.0f;
+    const uint8_t pct = battery::estimatePercent(volts);
     body += "{\"timestamp\":\"";
     body += iso8601(periodEnd);
     body += "\",\"period_start\":\"";
     body += iso8601(record.periodStart);
     body += "\",\"pulses\":";
     body += String(record.pulses);
+    body += ",\"battery_v\":";
+    body += String(volts, 2);
+    body += ",\"battery_pct_est\":";
+    body += String(pct);
     body += "}";
   }
 
@@ -112,7 +115,7 @@ bool syncRtcFromNetwork() {
   return false;
 }
 
-Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
+Result sendBatch(const storage::UploadBatch &batch) {
   if (!ensureWifiConnected()) {
     disconnectWifiIfAllowed();
     return Result::WifiFailed;
@@ -164,7 +167,7 @@ Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batt
   http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
   http.addHeader("Content-Type", "application/json");
 
-  const String body = buildBody(batch, batteryReading);
+  const String body = buildBody(batch);
   if (config::EnableSerialLogs) {
     Serial.printf("upload post start records=%u bytes=%u\n", batch.count, body.length());
   }

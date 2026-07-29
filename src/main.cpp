@@ -349,7 +349,7 @@ void handleUploadWake() {
       Serial.printf("upload batch records=%u battery=%.2fV pct=%u\n",
                     batch.count, reading.volts, reading.percent);
     }
-    const auto result = upload::sendBatch(batch, reading);
+    const auto result = upload::sendBatch(batch);
     if (config::EnableSerialLogs) {
       Serial.printf("upload result=%s records=%u\n", upload::resultName(result), batch.count);
     }

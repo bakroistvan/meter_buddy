@@ -52,8 +52,6 @@ def init_db() -> None:
               device_id TEXT NOT NULL,
               meter_impulses_per_kwh INTEGER NOT NULL,
               upload_trigger TEXT,
-              battery_v REAL,
-              battery_pct_est INTEGER,
               reading_count INTEGER NOT NULL,
               raw_json TEXT NOT NULL
             );
@@ -64,7 +62,9 @@ def init_db() -> None:
               device_id TEXT NOT NULL,
               timestamp TEXT NOT NULL,
               period_start TEXT,
-              pulses INTEGER NOT NULL
+              pulses INTEGER NOT NULL,
+              battery_v REAL,
+              battery_pct_est INTEGER
             );
 
             CREATE INDEX IF NOT EXISTS idx_upload_dumps_received_at
@@ -91,19 +91,15 @@ def store_upload(payload: UploadPayload) -> tuple[int, int]:
               device_id,
               meter_impulses_per_kwh,
               upload_trigger,
-              battery_v,
-              battery_pct_est,
               reading_count,
               raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 received_at,
                 payload.device_id,
                 payload.meter_impulses_per_kwh,
                 payload.upload_trigger,
-                payload.battery_v,
-                payload.battery_pct_est,
                 len(payload.readings),
                 raw_json,
             ),
@@ -117,8 +113,10 @@ def store_upload(payload: UploadPayload) -> tuple[int, int]:
               device_id,
               timestamp,
               period_start,
-              pulses
-            ) VALUES (?, ?, ?, ?, ?)
+              pulses,
+              battery_v,
+              battery_pct_est
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -129,6 +127,8 @@ def store_upload(payload: UploadPayload) -> tuple[int, int]:
                     if reading.period_start
                     else None,
                     reading.pulses,
+                    reading.battery_v,
+                    reading.battery_pct_est,
                 )
                 for reading in payload.readings
             ],
@@ -148,8 +148,6 @@ def list_dumps() -> list[sqlite3.Row]:
                   device_id,
                   meter_impulses_per_kwh,
                   upload_trigger,
-                  battery_v,
-                  battery_pct_est,
                   reading_count
                 FROM upload_dumps
                 ORDER BY received_at DESC, id DESC
@@ -163,7 +161,7 @@ def get_dump_meta(dump_id: int) -> dict | None:
         row = conn.execute(
             """
             SELECT id, received_at, device_id, meter_impulses_per_kwh,
-                   upload_trigger, battery_v, battery_pct_est, reading_count
+                   upload_trigger, reading_count
             FROM upload_dumps WHERE id = ?
             """,
             (dump_id,),

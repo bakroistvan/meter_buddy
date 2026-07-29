@@ -26,13 +26,13 @@ def test_upload_index_and_download(tmp_path, monkeypatch):
             "device_id": "meter-buddy-001",
             "meter_impulses_per_kwh": 1000,
             "upload_trigger": "button",
-            "battery_v": 3.87,
-            "battery_pct_est": 62,
             "readings": [
                 {
                     "timestamp": "2026-05-01T13:00:00Z",
                     "period_start": "2026-05-01T12:00:00Z",
                     "pulses": 42,
+                    "battery_v": 3.87,
+                    "battery_pct_est": 62,
                 }
             ],
         }
@@ -79,13 +79,13 @@ def test_delete_dump_and_bulk_delete(tmp_path, monkeypatch):
         "device_id": "meter-buddy-001",
         "meter_impulses_per_kwh": 1000,
         "upload_trigger": "button",
-        "battery_v": 3.87,
-        "battery_pct_est": 62,
         "readings": [
             {
                 "timestamp": "2026-05-01T13:00:00Z",
                 "period_start": "2026-05-01T12:00:00Z",
                 "pulses": 42,
+                "battery_v": 3.87,
+                "battery_pct_est": 62,
             }
         ],
     }
@@ -133,13 +133,13 @@ def test_websocket_receives_new_dump_notification(tmp_path, monkeypatch):
                 "device_id": "meter-buddy-002",
                 "meter_impulses_per_kwh": 1000,
                 "upload_trigger": "button",
-                "battery_v": 3.9,
-                "battery_pct_est": 70,
                 "readings": [
                     {
                         "timestamp": "2026-06-01T10:00:00Z",
                         "period_start": "2026-06-01T09:00:00Z",
                         "pulses": 10,
+                        "battery_v": 3.9,
+                        "battery_pct_est": 70,
                     }
                 ],
             }

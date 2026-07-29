@@ -184,7 +184,7 @@
       #readings-plot {
         display: block;
         width: 100%;
-        min-height: 320px;
+        min-height: 600px;
         margin-top: 0.8rem;
       }
 
@@ -428,24 +428,29 @@
         window.lastPlotReadings = readings;
         var canvas = document.getElementById("readings-plot");
         var width = canvas.clientWidth || 900;
-        var height = 480;
-        var scale = window.devicePixelRatio || 1;
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        var ctx = canvas.getContext("2d");
-        ctx.scale(scale, scale);
-        ctx.clearRect(0, 0, width, height);
-
+        var hasBattery = readings.some(function (r) { return r.battery_v !== null && r.battery_v !== undefined; });
+        var hasBatteryPct = readings.some(function (r) { return r.battery_pct_est !== null && r.battery_pct_est !== undefined; });
+        var numPanels = 2 + (hasBattery ? 1 : 0) + (hasBatteryPct ? 1 : 0);
+        var panelH = 160;
+        var gap = 44;
         var left = 62;
         var right = 18;
         var top = 28;
         var bottom = 42;
-        var gap = 54;
-        var panelHeight = (height - top - bottom - gap) / 2;
+        var height = top + numPanels * panelH + (numPanels - 1) * gap + bottom;
+        var scale = window.devicePixelRatio || 1;
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        canvas.style.minHeight = height + "px";
+        var ctx = canvas.getContext("2d");
+        ctx.scale(scale, scale);
+        ctx.clearRect(0, 0, width, height);
+
         var plotWidth = width - left - right;
         var minTime = readings[0].time;
         var maxTime = readings[readings.length - 1].time;
         if (minTime === maxTime) maxTime = minTime + 3600000;
+
         var maxPulses = Math.max(1, Math.max.apply(null, readings.map(function (r) { return r.pulses; })));
         var cumulative = 0;
         readings.forEach(function (r) {
@@ -455,39 +460,54 @@
         var maxKwh = Math.max(0.001, cumulative);
 
         function x(time) { return left + (time - minTime) / (maxTime - minTime) * plotWidth; }
-        function y(value, panelTop, max) { return panelTop + panelHeight - value / max * panelHeight; }
-        function drawPanel(panelTop, max, label, color, valueFn) {
+        function y(value, panelTop, max) { return panelTop + panelH - value / max * panelH; }
+
+        function drawPanel(panelTop, max, label, color, points, valueFn) {
           ctx.strokeStyle = "#d9e2ec";
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.moveTo(left, panelTop);
-          ctx.lineTo(left, panelTop + panelHeight);
-          ctx.lineTo(width - right, panelTop + panelHeight);
+          ctx.lineTo(left, panelTop + panelH);
+          ctx.lineTo(width - right, panelTop + panelH);
           ctx.stroke();
           ctx.fillStyle = "#52606d";
           ctx.font = "12px system-ui, sans-serif";
           ctx.fillText(label, 8, panelTop + 12);
-          ctx.fillText("0", left - 22, panelTop + panelHeight + 4);
+          ctx.fillText("0", left - 22, panelTop + panelH + 4);
           ctx.fillText(max.toFixed(2), left - 42, panelTop + 4);
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
-          readings.forEach(function (r, i) {
+          points.forEach(function (r, i) {
             var px = x(r.time);
             var py = y(valueFn(r), panelTop, max);
             if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
           });
           ctx.stroke();
           ctx.fillStyle = color;
-          readings.forEach(function (r) {
+          points.forEach(function (r) {
             ctx.beginPath();
-            ctx.arc(x(r.time), y(valueFn(r), panelTop, max), 2.5, 0, Math.PI * 2);
+            ctx.arc(x(r.time), y(valueFn(r), panelTop, max), 3, 0, Math.PI * 2);
             ctx.fill();
           });
         }
 
-        drawPanel(top, maxPulses, "Pulses / period", "#1f6fb0", function (r) { return r.pulses; });
-        drawPanel(top + panelHeight + gap, maxKwh, "Cumulative kWh", "#2f855a", function (r) { return r.cumulativeKwh; });
+        var panelIdx = 0;
+        function nextPanelTop() { return top + panelIdx++ * (panelH + gap); }
+
+        drawPanel(nextPanelTop(), maxPulses, "Pulses / period", "#1f6fb0", readings, function (r) { return r.pulses; });
+        drawPanel(nextPanelTop(), maxKwh, "Cumulative kWh", "#2f855a", readings, function (r) { return r.cumulativeKwh; });
+
+        if (hasBattery) {
+          var withV = readings.filter(function (r) { return r.battery_v !== null && r.battery_v !== undefined; });
+          var maxV = Math.max.apply(null, withV.map(function (r) { return r.battery_v; }));
+          drawPanel(nextPanelTop(), Math.max(maxV * 1.05, 0.001), "Battery V", "#c05621", withV, function (r) { return r.battery_v; });
+        }
+        if (hasBatteryPct) {
+          var withPct = readings.filter(function (r) { return r.battery_pct_est !== null && r.battery_pct_est !== undefined; });
+          drawPanel(nextPanelTop(), 100, "Battery %", "#6b46c1", withPct, function (r) { return r.battery_pct_est; });
+        }
+
         ctx.fillStyle = "#52606d";
         ctx.font = "11px system-ui, sans-serif";
         [0, 0.5, 1].forEach(function (fraction) {
@@ -525,7 +545,9 @@
               readings.push({
                 time: Date.parse(reading.timestamp),
                 pulses: Number(reading.pulses),
-                impulsesPerKwh: impulses
+                impulsesPerKwh: impulses,
+                battery_v: reading.battery_v !== undefined ? reading.battery_v : null,
+                battery_pct_est: reading.battery_pct_est !== undefined ? reading.battery_pct_est : null
               });
             });
           });
