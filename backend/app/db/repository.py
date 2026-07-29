@@ -207,3 +207,36 @@ def delete_dumps_up_to(max_id: int) -> int:
             (max_id,),
         )
         return int(cursor.rowcount)
+
+
+def reset_db() -> None:
+    path = db_path()
+    if path.exists():
+        path.unlink()
+    init_db()
+
+
+def replace_db_file(content: bytes) -> None:
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_bytes(content)
+
+    conn = None
+    try:
+        conn = sqlite3.connect(temp_path)
+        conn.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    except Exception as e:
+        if conn:
+            conn.close()
+        if temp_path.exists():
+            temp_path.unlink()
+        raise ValueError(f"Invalid SQLite database file: {e}") from e
+    else:
+        conn.close()
+
+    if path.exists():
+        path.unlink()
+    temp_path.replace(path)
+    init_db()
+

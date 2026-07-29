@@ -4,9 +4,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 
-from app.db import delete_dump, delete_dumps_up_to, get_dump_json
+from app.db import delete_dump, delete_dumps_up_to, get_dump_json, list_dumps
 
 router = APIRouter()
+
+
+@router.get("/dumps")
+def list_dumps_endpoint() -> list[dict]:
+    return [dict(row) for row in list_dumps()]
+
 
 
 @router.get("/dumps/{dump_id}/preview")

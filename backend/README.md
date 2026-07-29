@@ -35,10 +35,10 @@ python3 -m venv .venv
 
 ## Run
 
-```bash
-export METER_BUDDY_AUTH_USER='meter-buddy'
-export METER_BUDDY_AUTH_PASSWORD='change-me'
-./.venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```powershell
+$env:METER_BUDDY_AUTH_USER="meter-buddy"
+$env:METER_BUDDY_AUTH_PASSWORD="change-me"
+.\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open:
