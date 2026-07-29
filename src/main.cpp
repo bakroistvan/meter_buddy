@@ -140,7 +140,7 @@ void enterDeepSleep() {
 
   logEvent("entering deep sleep");
   digitalWrite(pins::PulseLedPin, LOW);
-  pinMode(pins::PulseLedPin, INPUT);
+  pinMode(pins::PulseLedPin, INPUT_PULLDOWN);
   awakeLed.setSleep();
   WiFi.mode(WIFI_OFF);
 
