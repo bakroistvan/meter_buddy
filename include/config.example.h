@@ -29,12 +29,11 @@ constexpr uint32_t NtpSyncTimeoutMs = 10000;
 
 // If the previous pulse was this recent, avoid immediate deep sleep and count
 // pulses while awake until the meter is quiet again.
-constexpr uint32_t PulseAwakeThresholdMs = 8000;
-constexpr uint32_t PulseAwakeQuietMs = 30000;
-constexpr uint32_t PulseAwakeMaxMs = 300000;
-constexpr uint32_t PulseDebounceMs = 50;
-constexpr uint32_t AwakePulseFlushMs = 5000;
-constexpr uint32_t WifiReconnectIntervalMs = 10000;
+constexpr uint32_t PulseAwakeThresholdMs = 8000; // Time between pulses to trigger awake counting (ms)
+constexpr uint32_t PulseAwakeQuietMs = 30000; // Time with no pulses before returning to sleep (ms)
+constexpr uint32_t PulseDebounceMs = 50; // Debounce time for pulse detection (ms)
+constexpr uint32_t AwakePulseFlushMs = 5000; // Interval for flushing counted pulses to storage while awake (ms)
+constexpr uint32_t WifiReconnectIntervalMs = 10000; // Interval for checking and reconnecting WiFi (ms)
 
 // RTC wake interval in seconds. Default 60.
 constexpr uint16_t RtcWakeIntervalSeconds = 60;

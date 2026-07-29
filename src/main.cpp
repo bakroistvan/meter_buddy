@@ -33,6 +33,7 @@ uint32_t lastWifiCheckMs = 0;
 bool awakePulseInterruptAttached = false;
 bool rtcClockAvailable = false;
 bool storageAvailable = false;
+bool stayAwakeOnBoot = config::StayAwakeOnUsbBoot;
 
 AwakeLed awakeLed;
 
@@ -68,25 +69,24 @@ const char *wakeSourceName(WakeSource source) {
 }
 
 WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
+  if (cause != ESP_SLEEP_WAKEUP_GPIO) {
+    return WakeSource::None;
+  }
+  
   const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
   if (uploadPressed) {
     return WakeSource::UploadButton;
   }
 
-  if (cause != ESP_SLEEP_WAKEUP_GPIO) {
-    return WakeSource::None;
-  }
-
-  const bool pulseLow = digitalRead(pins::PulseWakePin) == LOW;
+  // Default to pulse for GPIO wake since pin state is unreliable
+  // (pulse is only 30-50ms but wake takes 100-200ms)
   const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
-
-  if (pulseLow) {
-    return WakeSource::Pulse;
-  }
   if (rtcLow) {
     return WakeSource::Rtc;
   }
-  return WakeSource::None;
+
+  
+  return WakeSource::Pulse;
 }
 
 void configurePins() {
@@ -218,22 +218,6 @@ bool sleepMakesSenseAfterPulse(uint32_t timestamp) {
   return intervalMs > config::PulseAwakeThresholdMs;
 }
 
-void debouncePulseWake() {
-  // Wait for stable LOW (pulse line is low)
-  const uint32_t lowStart = millis();
-  while (digitalRead(pins::PulseWakePin) == LOW &&
-         millis() - lowStart < config::PulseDebounceMs * 4) {
-    delay(1);
-  }
-
-  // Wait for stable HIGH (pulse line returns high)
-  const uint32_t highStart = millis();
-  while (digitalRead(pins::PulseWakePin) == HIGH &&
-         millis() - highStart < config::PulseDebounceMs * 4) {
-    delay(1);
-  }
-}
-
 uint32_t countAwakeUntilQuiet() {
   awakePulseCount = 0;
   lastPulseRiseMs = millis();
@@ -268,9 +252,6 @@ uint32_t countAwakeUntilQuiet() {
 
 void handlePulseWake(uint32_t timestamp) {
   logEvent("pulse wake");
-
-  // Debounce: wait for stable LOW then stable HIGH to ensure complete pulse
-  debouncePulseWake();
 
   digitalWrite(pins::PulseLedPin, HIGH);
   delay(100);
@@ -466,6 +447,7 @@ void handleDiagnosticsBoot() {
           } else if (first == 'r') {
             ESP.restart();
           } else if (first == 'x') {
+            stayAwakeOnBoot = false;
             logEvent("entering deep sleep");
             enterDeepSleep();
           } else {
@@ -650,7 +632,7 @@ void setup() {
   }
 
   // Enter deep sleep for normal boots unless the device should stay awake on USB.
-  if (!config::StayAwakeOnUsbBoot) {
+  if (!stayAwakeOnBoot) {
     enterDeepSleep();
     return;
   }
