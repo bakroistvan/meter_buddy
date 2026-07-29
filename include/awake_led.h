@@ -28,6 +28,7 @@ public:
 
   void setSleep() {
     digitalWrite(pins::AwakeLedPin, LOW);
+    pinMode(pins::AwakeLedPin, INPUT);
   }
 
   void setOn() {
