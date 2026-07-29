@@ -6,13 +6,22 @@
 
 class AwakeLed {
 public:
+  enum class Mode {
+    AlwaysAwake,
+    WakeFromDeepSleep,
+  };
+
   void init() {
     pinMode(pins::AwakeLedPin, OUTPUT);
     digitalWrite(pins::AwakeLedPin, LOW);
   }
 
+  void setMode(Mode newMode) {
+    mode = newMode;
+  }
+
   void setAwake() {
-    if (config::EnableDeepSleep) {
+    if (mode == Mode::WakeFromDeepSleep) {
       digitalWrite(pins::AwakeLedPin, HIGH);
     }
   }
@@ -30,7 +39,7 @@ public:
   }
 
   void blink() {
-    if (config::EnableDeepSleep) {
+    if (mode == Mode::WakeFromDeepSleep) {
       digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
       delay(100);
       digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
@@ -42,7 +51,7 @@ public:
   }
 
   void doubleBlink() {
-    if (config::EnableDeepSleep) {
+    if (mode == Mode::WakeFromDeepSleep) {
       digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
       delay(100);
       digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
@@ -62,7 +71,7 @@ public:
   }
 
   void rapidErrorBlink() {
-    if (config::EnableDeepSleep) {
+    if (mode == Mode::WakeFromDeepSleep) {
       for (uint8_t i = 0; i < 10; ++i) {
         digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
         delay(100);
@@ -82,4 +91,7 @@ public:
   bool isOn() const {
     return digitalRead(pins::AwakeLedPin) == HIGH;
   }
+
+private:
+  Mode mode = Mode::AlwaysAwake;
 };

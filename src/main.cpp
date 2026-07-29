@@ -365,9 +365,11 @@ void handleUploadWake() {
   flushAwakePulses(true);
   if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
   if (uploadSucceeded) {
-    awakeLed.setOff();
     if (uploadedRecords) {
+      awakeLed.setOff();
       upload::checkFirmwareUpdate();
+    } else {
+      awakeLed.rapidErrorBlink();
     }
   } else {
     awakeLed.rapidErrorBlink();
@@ -381,7 +383,7 @@ void handleDiagnosticsBoot() {
   const auto reading = battery::sample();
   Serial.printf("battery=%.2fV pct=%u\n", reading.volts, reading.percent);
 
-  Serial.println("Diagnostics REPL. Commands: dump, clear, status, t[ime], upload, reboot");
+  Serial.println("Diagnostics REPL. Commands: dump, clear, status, t[ime], upload, reboot, x[sleep]");
   String cmd = "";
   static bool uploadWasLow = false;
   static bool rtcWasLow = false;
@@ -467,6 +469,9 @@ void handleDiagnosticsBoot() {
             handleUploadWake();
           } else if (first == 'r') {
             ESP.restart();
+          } else if (first == 'x') {
+            logEvent("entering deep sleep");
+            enterDeepSleep();
           } else {
             Serial.println("unknown command");
           }
@@ -583,9 +588,12 @@ void setup() {
 
   // Configure the GPIO pins used for wake sources, buttons, and LED status.
   configurePins();
-  // Turn on awake LED if deep sleep is enabled
+  // Set awake LED mode based on deep sleep config
   if (config::EnableDeepSleep) {
+    awakeLed.setMode(AwakeLed::Mode::WakeFromDeepSleep);
     awakeLed.setAwake();
+  } else {
+    awakeLed.setMode(AwakeLed::Mode::AlwaysAwake);
   }
   // Initialize the I2C bus for attached peripherals.
   Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
