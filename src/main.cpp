@@ -218,20 +218,20 @@ bool sleepMakesSenseAfterPulse(uint32_t timestamp) {
   return intervalMs > config::PulseAwakeThresholdMs;
 }
 
-bool isPulseRewake(uint32_t timestamp) {
-  const bool pulseStillLow = digitalRead(pins::PulseWakePin) == LOW;
-  const bool repeatedTimestamp = timestamp > 0 && lastPulseWakeUnix > 0 && timestamp <= lastPulseWakeUnix;
-
-  if (!pulseStillLow) {
-    return false;
+void debouncePulseWake() {
+  // Wait for stable LOW (pulse line is low)
+  const uint32_t lowStart = millis();
+  while (digitalRead(pins::PulseWakePin) == LOW &&
+         millis() - lowStart < config::PulseDebounceMs * 4) {
+    delay(1);
   }
 
-  if (repeatedTimestamp) {
-    logEvent("pulse re-wake suppressed: pin still low");
-    return true;
+  // Wait for stable HIGH (pulse line returns high)
+  const uint32_t highStart = millis();
+  while (digitalRead(pins::PulseWakePin) == HIGH &&
+         millis() - highStart < config::PulseDebounceMs * 4) {
+    delay(1);
   }
-
-  return false;
 }
 
 uint32_t countAwakeUntilQuiet() {
@@ -246,11 +246,10 @@ uint32_t countAwakeUntilQuiet() {
 
   attachAwakePulseInterrupt();
 
-  const uint32_t started = millis();
   uint32_t lastCount = 0;
   uint32_t quietSince = millis();
 
-  while (millis() - started < config::PulseAwakeMaxMs) {
+  while (true) {
     servicePulseLed();
     const uint32_t count = awakePulseCount;
     if (count != lastCount) {
@@ -270,12 +269,8 @@ uint32_t countAwakeUntilQuiet() {
 void handlePulseWake(uint32_t timestamp) {
   logEvent("pulse wake");
 
-  // Suppress immediate re-wakes while the pulse line is still held high.
-  // This avoids double-counting the same physical pulse when the ESP32-C3
-  // wakes again before the line has returned low.
-  if (isPulseRewake(timestamp)) {
-    return;
-  }
+  // Debounce: wait for stable LOW then stable HIGH to ensure complete pulse
+  debouncePulseWake();
 
   digitalWrite(pins::PulseLedPin, HIGH);
   delay(100);
