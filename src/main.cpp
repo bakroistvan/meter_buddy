@@ -323,7 +323,7 @@ void handleUploadWake() {
 
   const bool pulseInterruptWasAttached = awakePulseInterruptAttached;
   attachAwakePulseInterrupt();
-  digitalWrite(pins::PulseLedPin, HIGH);
+  digitalWrite(pins::AwakeLedPin, HIGH);
 
   logEvent("pre-roll");
   storage::dump(Serial);
@@ -364,7 +364,7 @@ void handleUploadWake() {
   flushAwakePulses(true);
   if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
   if (uploadSucceeded) {
-    digitalWrite(pins::PulseLedPin, LOW);
+    digitalWrite(pins::AwakeLedPin, LOW);
     if (uploadedRecords) {
       upload::checkFirmwareUpdate();
     }
@@ -490,8 +490,8 @@ uint32_t currentTimestamp() {
 
 void rapidErrorBlink() {
   for (uint8_t i = 0; i < 10; ++i) {
-    digitalWrite(pins::PulseLedPin, HIGH); delay(100);
-    digitalWrite(pins::PulseLedPin, LOW); delay(100);
+    digitalWrite(pins::AwakeLedPin, HIGH); delay(100);
+    digitalWrite(pins::AwakeLedPin, LOW); delay(100);
   }
 }
 
