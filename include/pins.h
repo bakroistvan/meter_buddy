@@ -19,7 +19,7 @@ constexpr uint8_t RtcWakePin = D3;
 constexpr uint8_t I2cSdaPin = D4;
 constexpr uint8_t I2cSclPin = D5;
 
-constexpr uint8_t PulseLedPin = D9; // Dedicated pulse indicator LED
+constexpr uint8_t PulseLedPin = D8; // Dedicated pulse indicator LED
 constexpr uint8_t AwakeLedPin = D10; // GPIO10, debug/status LED
 
 } // namespace pins

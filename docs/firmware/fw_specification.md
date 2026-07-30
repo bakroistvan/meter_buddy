@@ -56,7 +56,7 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 ### US-8 — LED meanings
 | LED | Pin | Meaning |
 | --- | --- | --- |
-| Pulse LED | D9 | HIGH ~100 ms per accepted pulse (wake flash or ISR) |
+| Pulse LED | D8 | HIGH ~100 ms per accepted pulse (wake flash or ISR) |
 | Status (`AwakeLed`) | D10 | Dim PWM (~30%, duty 77) = idle awake; full = upload in progress / long-press feedback; `blink` = RTC wake; `doubleBlink` = stay-awake enabled; `rapidErrorBlink` (10×) = upload failure **or** stay-awake disabled; off + pulldown = sleep |
 
 ### US-9 — Deep sleep disabled
@@ -135,7 +135,7 @@ Firmware depends on the following pin map and power topology (Seeed XIAO ESP32-C
 | RTC alarm (DS3231 SQW) | D3 (GPIO5) | Active LOW |
 | I2C SDA | D4 (GPIO6) | DS3231 |
 | I2C SCL | D5 (GPIO7) | DS3231 |
-| Pulse LED | D9 | Drive via series resistor on anode |
+| Pulse LED | D8 | Drive via series resistor on anode |
 | Status LED | D10 | Drive via series resistor on anode |
 
 **Power / sensors (firmware prerequisites):**
