@@ -1,6 +1,9 @@
 .pio/
 .platformio-core/
 .venv/
+.env
+!.env.example
+
 backend/.venv/
 backend/data/*.sqlite3
 backend/data/*.sqlite3-*
