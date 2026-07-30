@@ -59,6 +59,27 @@ docker compose up --build -d
 
 This starts the FastAPI backend on port `8000` (`http://127.0.0.1:8000/`). The SQLite database is stored in a persistent Docker volume named `backend_data`.
 
+`docker-compose.yml` injects auth credentials at **runtime** (local defaults `meter-buddy` / `change-me`). Override the password for anything beyond local use, for example:
+
+```bash
+METER_BUDDY_AUTH_PASSWORD='your-secret' docker compose up --build -d
+```
+
+Or edit the Compose `environment` / use an `env_file` that is not committed.
+
+To run a pre-built image (e.g. from GHCR) without Compose:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e METER_BUDDY_AUTH_USER=meter-buddy \
+  -e METER_BUDDY_AUTH_PASSWORD='your-secret' \
+  -e METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3 \
+  -v meter_buddy_data:/data \
+  ghcr.io/<owner>/meter_buddy:latest
+```
+
+The Dockerfile does **not** bake `METER_BUDDY_AUTH_USER` or `METER_BUDDY_AUTH_PASSWORD` into the image. In CI/production, set them from GitHub Secrets, orchestrator secrets, or `docker -e` — never via image `ENV`/`ARG`.
+
 To run tests inside the Docker container:
 
 ```bash
@@ -71,11 +92,13 @@ docker compose run --entrypoint "python -m pytest tests" backend
 Environment variables:
 
 - `METER_BUDDY_DB_PATH`
-  - Default: `backend/data/meter_buddy.sqlite3` (relative to the backend package when unset)
+  - Default: `backend/data/meter_buddy.sqlite3` (relative to the backend package when unset); Docker image default `/data/meter_buddy.sqlite3`
 - `METER_BUDDY_AUTH_USER`
-  - Default: `meter-buddy`
+  - App fallback when unset: `meter-buddy`
+  - Inject at runtime for Docker/deployed runs (not set in the Dockerfile)
 - `METER_BUDDY_AUTH_PASSWORD`
-  - Default: `change-me`
+  - App fallback when unset: `change-me` (local/dev only)
+  - **Inject at runtime for Docker/deployed runs** — pass via Compose, `docker -e`, or secrets; not set in the Dockerfile
 
 Use a real password and HTTPS for anything reachable outside your machine.
 

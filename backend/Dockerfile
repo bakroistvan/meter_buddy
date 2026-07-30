@@ -14,9 +14,10 @@ COPY tests/ ./tests/
 # Expose port
 EXPOSE 8000
 
-# Set default env variables (can be overridden at runtime)
-ENV METER_BUDDY_AUTH_USER="meter-buddy"
-ENV METER_BUDDY_AUTH_PASSWORD="change-me"
+# Non-secret defaults (can be overridden at runtime).
+# Do not bake auth credentials into the image: pass METER_BUDDY_AUTH_USER /
+# METER_BUDDY_AUTH_PASSWORD via `docker run -e`, Compose `environment`/`env_file`,
+# or orchestrator secrets (SecretsUsedInArgOrEnv).
 ENV METER_BUDDY_DB_PATH="/data/meter_buddy.sqlite3"
 
 # Create data directory

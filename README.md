@@ -133,6 +133,8 @@ cd backend
 docker compose up --build -d
 ```
 
+Pass auth credentials at runtime (Compose / `docker -e` / secrets) — they are not baked into the image. Details: [backend/README.md](backend/README.md).
+
 Or run with a local venv (see [backend/README.md](backend/README.md)).
 
 - Index UI: `http://127.0.0.1:8000/`

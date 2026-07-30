@@ -6,8 +6,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - METER_BUDDY_AUTH_USER=meter-buddy
-      - METER_BUDDY_AUTH_PASSWORD=change-me
+      # Runtime injection only (not baked into the image). Override for non-local use.
+      - METER_BUDDY_AUTH_USER=${METER_BUDDY_AUTH_USER:-meter-buddy}
+      - METER_BUDDY_AUTH_PASSWORD=${METER_BUDDY_AUTH_PASSWORD:-change-me}
       - METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3
     volumes:
       - backend_data:/data
