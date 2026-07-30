@@ -169,7 +169,7 @@ def test_invalid_auth_and_payload(tmp_path, monkeypatch):
     with TestClient(app.main.app) as client:
         response = client.post(
             "/api/meter-buddy/upload",
-            headers=auth_header(password="wrong"),
+            headers=auth_header("meter-buddy", "wrong-pass"),
             json={"device_id": "meter-buddy-001"},
         )
         assert response.status_code == 401

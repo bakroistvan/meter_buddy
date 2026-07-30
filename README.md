@@ -140,6 +140,13 @@ Or run with a local venv (see [backend/README.md](backend/README.md)).
 - Index UI: `http://127.0.0.1:8000/`
 - Upload endpoint: `POST /api/meter-buddy/upload`
 
+Backend tests need the packages in `backend/requirements.txt` (includes pytest, fastapi, httpx):
+
+```powershell
+python -m pip install -r backend/requirements.txt
+python -m pytest -q backend
+```
+
 ## Hardware wiring
 
 Normative pin map and hardware assumptions: [docs/firmware/fw_specification.md](docs/firmware/fw_specification.md) (Hardware assumptions). Historical wiring notes: [docs/archive/wiring.md](docs/archive/wiring.md).

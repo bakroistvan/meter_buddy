@@ -127,9 +127,14 @@ curl -i \
 
 ## Test
 
+Install dependencies first (`pip install -r requirements.txt` from `backend/`, or `pip install -r backend/requirements.txt` from the repo root). Then:
+
 ```bash
-cd backend
+# From backend/
 ./.venv/bin/python -m pytest tests
+
+# Or from repo root (same suite):
+python -m pytest -q backend
 ```
 
 ## Firmware URL
