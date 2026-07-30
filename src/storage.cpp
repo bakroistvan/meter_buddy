@@ -1,7 +1,10 @@
 #include "storage.h"
 
+#include <cstdio>
 #include <LittleFS.h>
 #include <FS.h>
+
+#include "config.h"
 
 namespace storage {
 
@@ -14,9 +17,11 @@ RTC_DATA_ATTR uint16_t rtcCurrentPulses = 0;
 
 uint32_t nextSequence = 1;
 uint32_t syncedThrough = 0;
+bool stayAwakeBootCached = config::StayAwakeBoot;
 
 const char *RecordsFile = "/records.bin";
 const char *SyncFile = "/sync.dat";
+const char *StayAwakeFile = "/stay_awake.dat";
 
 uint16_t crc16(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -52,6 +57,32 @@ bool saveSyncState() {
   file.write(reinterpret_cast<const uint8_t*>(&syncedThrough), sizeof(syncedThrough));
   file.close();
   return true;
+}
+
+void loadStayAwakeState() {
+  stayAwakeBootCached = config::StayAwakeBoot;
+  File file = LittleFS.open(StayAwakeFile, FILE_READ);
+  if (!file) {
+    return;
+  }
+  if (file.size() >= 1) {
+    uint8_t value = 0;
+    if (file.read(&value, 1) == 1) {
+      stayAwakeBootCached = value != 0;
+    }
+  }
+  file.close();
+}
+
+bool saveStayAwakeState() {
+  File file = LittleFS.open(StayAwakeFile, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+  const uint8_t value = stayAwakeBootCached ? 1 : 0;
+  const bool ok = file.write(&value, 1) == 1;
+  file.close();
+  return ok;
 }
 
 void loadNextSequence() {
@@ -146,6 +177,48 @@ void compactRecords() {
   LittleFS.rename("/tmp_records.bin", RecordsFile);
 }
 
+bool scanMinSequence(uint32_t &minSequence) {
+  minSequence = 0;
+
+  File file = LittleFS.open(RecordsFile, FILE_READ);
+  if (!file) {
+    return false;
+  }
+
+  bool found = false;
+  ReadingRecord record;
+  while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
+    if (record.crc != objectCrc(record)) {
+      break;
+    }
+    if (!found || record.sequence < minSequence) {
+      minSequence = record.sequence;
+      found = true;
+    }
+  }
+  file.close();
+  return found;
+}
+
+// Recover from a /sync.dat pointer that no longer matches /records.bin.
+void repairSyncState() {
+  uint32_t minSequence = 0;
+  if (!scanMinSequence(minSequence)) {
+    return;
+  }
+
+  if (syncedThrough >= nextSequence) {
+    syncedThrough = 0;
+    saveSyncState();
+    return;
+  }
+
+  if (minSequence <= syncedThrough) {
+    compactRecords();
+    loadNextSequence();
+  }
+}
+
 } // namespace
 
 bool begin() {
@@ -156,6 +229,8 @@ bool begin() {
   initialized = true;
   loadSyncState();
   loadNextSequence();
+  repairSyncState();
+  loadStayAwakeState();
   return true;
 }
 
@@ -209,23 +284,62 @@ bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv) {
 bool loadUploadBatch(UploadBatch &batch) {
   batch = {};
   if (!initialized) {
-    return false;
+    if (batch.errorCount < MaxUploadErrors) {
+      batch.errors[batch.errorCount].code = "storage_unavailable";
+      batch.errors[batch.errorCount].detail[0] = '\0';
+      ++batch.errorCount;
+    }
+    return true;
   }
+
   File file = LittleFS.open(RecordsFile, FILE_READ);
-  if (!file) return true;
+  if (!file) {
+    if (batch.errorCount < MaxUploadErrors) {
+      batch.errors[batch.errorCount].code = "no_data";
+      batch.errors[batch.errorCount].detail[0] = '\0';
+      ++batch.errorCount;
+    }
+    return true;
+  }
 
   ReadingRecord record;
+  size_t offset = 0;
   while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
-    if (record.crc == objectCrc(record) && record.sequence > syncedThrough) {
+    if (record.crc != objectCrc(record)) {
+      if (batch.errorCount < MaxUploadErrors) {
+        batch.errors[batch.errorCount].code = "crc_mismatch";
+        snprintf(batch.errors[batch.errorCount].detail,
+                 sizeof(batch.errors[batch.errorCount].detail),
+                 "offset=%u",
+                 static_cast<unsigned>(offset));
+        ++batch.errorCount;
+      }
+      break;
+    }
+
+    if (record.sequence > syncedThrough) {
       if (batch.count < MaxUploadRecords) {
         batch.records[batch.count++] = record;
         batch.newestSequence = record.sequence;
       } else {
+        batch.truncated = true;
+        if (batch.errorCount < MaxUploadErrors) {
+          batch.errors[batch.errorCount].code = "batch_truncated";
+          batch.errors[batch.errorCount].detail[0] = '\0';
+          ++batch.errorCount;
+        }
         break;
       }
     }
+    offset += sizeof(ReadingRecord);
   }
   file.close();
+
+  if (batch.count == 0 && batch.errorCount == 0) {
+    batch.errors[batch.errorCount].code = "no_data";
+    batch.errors[batch.errorCount].detail[0] = '\0';
+    ++batch.errorCount;
+  }
   return true;
 }
 
@@ -249,6 +363,18 @@ uint32_t unsyncedCount() {
   return (nextSequence - 1) - syncedThrough;
 }
 
+bool stayAwakeBoot() {
+  return stayAwakeBootCached;
+}
+
+bool setStayAwakeBoot(bool enabled) {
+  stayAwakeBootCached = enabled;
+  if (!initialized) {
+    return false;
+  }
+  return saveStayAwakeState();
+}
+
 void dump(Stream &stream) {
   if (!initialized) {
     stream.println("storage unavailable");
@@ -256,21 +382,25 @@ void dump(Stream &stream) {
   }
   hexdumpFile(stream, RecordsFile);
   hexdumpFile(stream, SyncFile);
+  hexdumpFile(stream, StayAwakeFile);
 }
 
 void clear() {
   if (!initialized) {
     nextSequence = 1;
     syncedThrough = 0;
+    stayAwakeBootCached = config::StayAwakeBoot;
     rtcCurrentPeriodStart = 0;
     rtcCurrentPulses = 0;
     return;
   }
   LittleFS.remove(RecordsFile);
   LittleFS.remove(SyncFile);
+  LittleFS.remove(StayAwakeFile);
   LittleFS.remove("/tmp_records.bin");
   nextSequence = 1;
   syncedThrough = 0;
+  stayAwakeBootCached = config::StayAwakeBoot;
   rtcCurrentPeriodStart = 0;
   rtcCurrentPulses = 0;
 }

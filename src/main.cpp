@@ -21,6 +21,11 @@ enum class WakeSource {
   UploadButton,
 };
 
+enum class UploadPressKind {
+  Short,
+  Long,
+};
+
 RTC_DATA_ATTR uint32_t lastPulseWakeUnix = 0;
 RTC_DATA_ATTR uint32_t lastAcceptedPulseWakeUnix = 0;
 
@@ -33,12 +38,12 @@ uint32_t lastWifiCheckMs = 0;
 bool awakePulseInterruptAttached = false;
 bool rtcClockAvailable = false;
 bool storageAvailable = false;
-bool stayAwakeOnBoot = config::StayAwakeOnUsbBoot;
+bool serialStarted = false;
 
 AwakeLed awakeLed;
 
 void logLine(const char *message) {
-  if (config::EnableSerialLogs) {
+  if (config::EnableSerialLogs && serialStarted) {
     Serial.println(message);
   }
 }
@@ -46,11 +51,25 @@ void logLine(const char *message) {
 uint32_t currentTimestamp();
 void flushAwakePulses(bool force = false);
 void servicePulseLed();
+void enterStayAwakeMode();
+void initWakePinsAndLed();
+void initSerialIfNeeded(bool withLogDelay);
+void initSubsystems(bool needFullRtc);
 String formatUtcTimestamp(uint32_t timestamp);
 String formatHumanUtcTimestamp(uint32_t timestamp);
 
+bool debugHostConnected() {
+  // XIAO ESP32-C3 uses HWCDC (USB-serial-JTAG). Stay awake only when USB is
+  // plugged and a host has the CDC port open — not merely because Serial.begin ran.
+  return serialStarted && Serial.isPlugged() && Serial.isConnected();
+}
+
+bool shouldStayAwake() {
+  return debugHostConnected() || storage::stayAwakeBoot();
+}
+
 void logEvent(const char *event) {
-  if (config::EnableSerialLogs) {
+  if (config::EnableSerialLogs && serialStarted) {
     Serial.printf("[%lu] %s\n", static_cast<unsigned long>(millis()), event);
   }
 }
@@ -72,30 +91,60 @@ WakeSource resolveWakeSource(esp_sleep_wakeup_cause_t cause) {
   if (cause != ESP_SLEEP_WAKEUP_GPIO) {
     return WakeSource::None;
   }
-  
-  const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
-  if (uploadPressed) {
+
+  // Human button presses last long enough to sample after wake.
+  if (digitalRead(pins::UploadButtonPin) == LOW) {
     return WakeSource::UploadButton;
   }
 
-  // Default to pulse for GPIO wake since pin state is unreliable
-  // (pulse is only 30-50ms but wake takes 100-200ms)
-  const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
-  if (rtcLow) {
+  if (digitalRead(pins::RtcWakePin) == LOW) {
     return WakeSource::Rtc;
   }
 
-  
+  // S0 meter pulses are ~3–50 ms; deep-sleep wake + boot is usually longer, so
+  // PulseWakePin is often already HIGH. Default GPIO wake to Pulse.
   return WakeSource::Pulse;
 }
 
-void configurePins() {
+void initWakePinsAndLed() {
   pinMode(pins::UploadButtonPin, INPUT_PULLUP);
   pinMode(pins::PulseWakePin, INPUT_PULLUP);
   pinMode(pins::RtcWakePin, INPUT_PULLUP);
   pinMode(pins::PulseLedPin, OUTPUT);
   digitalWrite(pins::PulseLedPin, LOW);
   awakeLed.init();
+  if (config::EnableDeepSleep) {
+    awakeLed.setMode(AwakeLed::Mode::WakeFromDeepSleep);
+  } else {
+    awakeLed.setMode(AwakeLed::Mode::AlwaysAwake);
+  }
+  awakeLed.setAwake();
+}
+
+void initSerialIfNeeded(bool withLogDelay) {
+  if (serialStarted) {
+    return;
+  }
+  Serial.begin(115200);
+  serialStarted = true;
+  if (withLogDelay && config::EnableSerialLogs) {
+    delay(300);
+  }
+}
+
+void initSubsystems(bool needFullRtc) {
+  Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
+  battery::begin();
+  const bool rtcOk = needFullRtc ? rtc_clock::begin() : rtc_clock::beginTimeOnly();
+  const bool storageOk = storage::begin();
+  rtcClockAvailable = rtcOk;
+  storageAvailable = storageOk;
+  if (!rtcOk) {
+    logLine("rtc init failed; using fallback timestamps");
+  }
+  if (!storageOk) {
+    logLine("storage init failed; persistence disabled for this boot");
+  }
 }
 
 // GPIO deep-sleep wakeup is level-triggered on ESP32-C3. If we arm the upload
@@ -292,9 +341,9 @@ void handleRtcWake(uint32_t timestamp) {
   rtc_clock::scheduleNextWakeAlarm();
 }
 
-void handleUploadWake() {
-  logEvent("upload button wake");
-  if (!uploadButtonPressed()) {
+void handleUploadWake(bool force = false) {
+  logEvent(force ? "forced upload" : "upload button wake");
+  if (!force && !uploadButtonPressed()) {
     logEvent("upload button debounce rejected");
     return;
   }
@@ -320,38 +369,136 @@ void handleUploadWake() {
       uploadSucceeded = false;
       break;
     }
-    if (batch.count == 0) break;
-    uploadedRecords = true;
 
     if (config::EnableSerialLogs) {
-      Serial.printf("upload batch records=%u battery=%.2fV pct=%u\n",
-                    batch.count, reading.volts, reading.percent);
+      Serial.printf("upload batch records=%u errors=%u battery=%.2fV pct=%u\n",
+                    batch.count, batch.errorCount, reading.volts, reading.percent);
     }
-    const auto result = upload::sendBatch(batch);
+    const auto result = upload::sendBatch(batch, reading);
     if (config::EnableSerialLogs) {
-      Serial.printf("upload result=%s records=%u\n", upload::resultName(result), batch.count);
+      Serial.printf("upload result=%s records=%u errors=%u\n",
+                    upload::resultName(result), batch.count, batch.errorCount);
     }
     if (result != upload::Result::Success) {
       uploadSucceeded = false;
       break;
     }
-    storage::markSyncedThrough(batch.newestSequence);
-    logEvent("upload marked records synced");
+    if (batch.count > 0) {
+      uploadedRecords = true;
+      storage::markSyncedThrough(batch.newestSequence);
+      logEvent("upload marked records synced");
+    }
+    // Empty heartbeat or final partial batch: one POST is enough unless truncated.
+    if (batch.count == 0 || !batch.truncated) {
+      break;
+    }
   }
 
   flushAwakePulses(true);
   if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
   if (uploadSucceeded) {
     if (uploadedRecords) {
-      awakeLed.setOff();
       upload::checkFirmwareUpdate();
-    } else {
-      awakeLed.rapidErrorBlink();
     }
   } else {
     awakeLed.rapidErrorBlink();
   }
+  // Upload blink helpers may leave the pin low; restore while still awake.
+  // enterDeepSleep() calls setSleep() when actually sleeping.
+  awakeLed.setAwake();
+}
 
+void handleStayAwakeToggle() {
+  const bool enabled = !storage::stayAwakeBoot();
+  storage::setStayAwakeBoot(enabled);
+  if (config::EnableSerialLogs && serialStarted) {
+    Serial.printf("StayAwakeBoot=%s\n", enabled ? "true" : "false");
+  }
+  logEvent(enabled ? "stay awake enabled" : "stay awake disabled");
+  if (enabled) {
+    awakeLed.setOn();
+    awakeLed.doubleBlink();
+  } else {
+    awakeLed.rapidErrorBlink();
+  }
+  // Long-press always keeps this session awake; keep the awake LED on.
+  awakeLed.setAwake();
+}
+
+// Classify upload button from deep-sleep wake. Call immediately after pins/LED —
+// before Serial delay and peripheral init — so short taps are not lost.
+UploadPressKind classifyUploadPressFromWake() {
+  if (digitalRead(pins::UploadButtonPin) != LOW) {
+    logEvent("upload wake: button already released, short press");
+    return UploadPressKind::Short;
+  }
+
+  const uint32_t pressedAt = millis();
+  while (true) {
+    if (digitalRead(pins::UploadButtonPin) != LOW) {
+      const uint32_t releasedAt = millis();
+      bool bounced = false;
+      while (millis() - releasedAt < config::PulseDebounceMs) {
+        if (digitalRead(pins::UploadButtonPin) == LOW) {
+          bounced = true;
+          break;
+        }
+        delay(1);
+      }
+      if (bounced) {
+        continue;
+      }
+      logEvent("upload wake: short press");
+      return UploadPressKind::Short;
+    }
+
+    if (millis() - pressedAt >= config::UploadLongPressMs) {
+      logEvent("upload wake: long press");
+      return UploadPressKind::Long;
+    }
+    delay(10);
+  }
+}
+
+// Awake-path button handler (diagnostics / poll). Returns true after long-press toggle.
+bool handleUploadButton(bool force = false) {
+  if (force) {
+    handleUploadWake(true);
+    return false;
+  }
+
+  if (!uploadButtonPressed()) {
+    logEvent("upload button debounce rejected");
+    return false;
+  }
+
+  const uint32_t pressedAt = millis();
+  while (true) {
+    if (digitalRead(pins::UploadButtonPin) != LOW) {
+      const uint32_t releasedAt = millis();
+      bool bounced = false;
+      while (millis() - releasedAt < config::PulseDebounceMs) {
+        if (digitalRead(pins::UploadButtonPin) == LOW) {
+          bounced = true;
+          break;
+        }
+        delay(1);
+      }
+      if (bounced) {
+        continue;
+      }
+      handleUploadWake(true);
+      return false;
+    }
+
+    if (millis() - pressedAt >= config::UploadLongPressMs) {
+      logEvent("upload button long press");
+      handleStayAwakeToggle();
+      waitForUploadButtonRelease();
+      return true;
+    }
+    delay(10);
+  }
 }
 
 void handleDiagnosticsBoot() {
@@ -381,9 +528,13 @@ void handleDiagnosticsBoot() {
     const bool uploadLow = digitalRead(pins::UploadButtonPin) == LOW;
     if (uploadLow && !uploadWasLow) {
       logEvent("upload button detected");
-      handleUploadWake();
+      const bool stayAfterLongPress = handleUploadButton();
+      if (!stayAfterLongPress && !shouldStayAwake()) {
+        enterDeepSleep();
+      }
     }
-    uploadWasLow = uploadLow;
+    // Re-read after handling: press may have been released inside handleUploadButton.
+    uploadWasLow = digitalRead(pins::UploadButtonPin) == LOW;
 
     const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
     if (rtcLow && !rtcWasLow) {
@@ -439,15 +590,15 @@ void handleDiagnosticsBoot() {
                           digitalRead(pins::PulseWakePin) == LOW ? "LOW" : "HIGH",
                           digitalRead(pins::RtcWakePin) == LOW ? "LOW" : "HIGH",
                           digitalRead(pins::PulseLedPin) == HIGH ? "HIGH" : "LOW",
-                          awakeLed.isOn() ? "HIGH" : "LOW");
+                          awakeLed.isFull() ? "FULL" : (awakeLed.isOn() ? "PWM" : "OFF"));
             Serial.printf("time=%s next_alarm=%s\n", nowIso, nextAlarmIso.c_str());
           } else if (first == 'u') {
             logEvent("upload triggered");
-            handleUploadWake();
+            handleUploadButton(true);
           } else if (first == 'r') {
             ESP.restart();
           } else if (first == 'x') {
-            stayAwakeOnBoot = false;
+            storage::setStayAwakeBoot(false);
             logEvent("entering deep sleep");
             enterDeepSleep();
           } else {
@@ -540,9 +691,12 @@ void pollAwakeControls() {
 
   const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
   if (uploadPressed && !uploadWasPressed) {
-    handleUploadWake();
+    const bool stayAfterLongPress = handleUploadButton();
+    if (!stayAfterLongPress && !shouldStayAwake()) {
+      enterDeepSleep();
+    }
   }
-  uploadWasPressed = uploadPressed;
+  uploadWasPressed = digitalRead(pins::UploadButtonPin) == LOW;
 
   const bool rtcLow = digitalRead(pins::RtcWakePin) == LOW;
   if (rtcLow && !rtcWasLow) {
@@ -552,91 +706,7 @@ void pollAwakeControls() {
   rtcWasLow = rtcLow;
 }
 
-} // namespace
-
-void setup() {
-  // Cancel OTA rollback so the firmware can boot normally after a valid update.
-  esp_ota_mark_app_valid_cancel_rollback();
-
-  if (config::EnableSerialLogs) {
-    // Start serial logging to provide boot-time diagnostics.
-    Serial.begin(115200);
-    delay(300);
-  }
-
-  // Configure the GPIO pins used for wake sources, buttons, and LED status.
-  configurePins();
-  // Set awake LED mode based on deep sleep config
-  if (config::EnableDeepSleep) {
-    awakeLed.setMode(AwakeLed::Mode::WakeFromDeepSleep);
-    awakeLed.setAwake();
-  } else {
-    awakeLed.setMode(AwakeLed::Mode::AlwaysAwake);
-  }
-  // Initialize the I2C bus for attached peripherals.
-  Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
-  // Initialize battery monitoring so the device can report power state.
-  battery::begin();
-
-  // Initialize the RTC and storage subsystems before handling boot behavior.
-  // Use time-only initialization for leaner pulse wakeups; full init with alarm
-  // cleanup will be done for RTC wakes.
-  const bool rtcOk = rtc_clock::beginTimeOnly();
-  const bool storageOk = storage::begin();
-  rtcClockAvailable = rtcOk;
-  storageAvailable = storageOk;
-  if (!rtcOk) {
-    logLine("rtc init failed; using fallback timestamps");
-  }
-  if (!storageOk) {
-    logLine("storage init failed; persistence disabled for this boot");
-  }
-
-  // Read the current timestamp and wake cause to decide how the boot should proceed.
-  const uint32_t timestamp = currentTimestamp();
-  const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-  const WakeSource wakeSource = resolveWakeSource(cause);
-
-  if (config::EnableSerialLogs) {
-    Serial.printf("boot cause=%d wake=%s rtc_available=%d storage_available=%d\n",
-                  static_cast<int>(cause),
-                  wakeSourceName(wakeSource),
-                  rtcClockAvailable ? 1 : 0,
-                  storageAvailable ? 1 : 0);
-  }
-
-  // Handle a wake caused by the pulse input before returning to deep sleep.
-  if (wakeSource == WakeSource::Pulse) {
-    handlePulseWake(timestamp);
-    enterDeepSleep();
-    return;
-  }
-
-  // Handle a wake caused by the RTC before returning to deep sleep.
-  if (wakeSource == WakeSource::Rtc) {
-    handleRtcWake(timestamp);
-    enterDeepSleep();
-    return;
-  }
-
-  // Handle a wake caused by the upload button before returning to deep sleep.
-  if (wakeSource == WakeSource::UploadButton) {
-    handleUploadWake();
-    enterDeepSleep();
-    return;
-  }
-
-  // Schedule the next wake alarm.
-  if (rtcClockAvailable) {
-    rtc_clock::scheduleNextWakeAlarm();
-  }
-
-  // Enter deep sleep for normal boots unless the device should stay awake on USB.
-  if (!stayAwakeOnBoot) {
-    enterDeepSleep();
-    return;
-  }
-
+void enterStayAwakeMode() {
   // Keep the device awake and listening for pulses when staying awake.
   attachAwakePulseInterrupt();
   if (config::KeepWifiConnectedWhenAwake) {
@@ -646,6 +716,96 @@ void setup() {
 
   // Run the boot diagnostics.
   handleDiagnosticsBoot();
+}
+
+void logBootSummary(esp_sleep_wakeup_cause_t cause, WakeSource wakeSource) {
+  if (!config::EnableSerialLogs || !serialStarted) {
+    return;
+  }
+  Serial.printf("boot cause=%d wake=%s rtc_available=%d storage_available=%d\n",
+                static_cast<int>(cause),
+                wakeSourceName(wakeSource),
+                rtcClockAvailable ? 1 : 0,
+                storageAvailable ? 1 : 0);
+  Serial.printf("stay_awake flash=%d usb=%d => %s\n",
+                storage::stayAwakeBoot() ? 1 : 0,
+                debugHostConnected() ? 1 : 0,
+                shouldStayAwake() ? "awake" : "sleep");
+}
+
+} // namespace
+
+void setup() {
+  esp_ota_mark_app_valid_cancel_rollback();
+
+  // Pins + LED first for immediate feedback and correct wake sampling.
+  initWakePinsAndLed();
+
+  const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+  const WakeSource wakeSource = resolveWakeSource(cause);
+
+  // Pulse: leanest path — S0 edge is usually gone; default-to-Pulse already applied.
+  if (wakeSource == WakeSource::Pulse) {
+    initSubsystems(/*needFullRtc=*/false);
+    handlePulseWake(currentTimestamp());
+    enterDeepSleep();
+    return;
+  }
+
+  // RTC: full RTC init for alarm cleanup.
+  if (wakeSource == WakeSource::Rtc) {
+    initSubsystems(/*needFullRtc=*/true);
+    handleRtcWake(currentTimestamp());
+    enterDeepSleep();
+    return;
+  }
+
+  // Upload button: classify short vs long before Serial/LittleFS/I2C delay.
+  if (wakeSource == WakeSource::UploadButton) {
+    const UploadPressKind kind = classifyUploadPressFromWake();
+
+    if (kind == UploadPressKind::Long) {
+      // Only need storage for /stay_awake.dat before toggle feedback.
+      Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
+      storageAvailable = storage::begin();
+      handleStayAwakeToggle();
+      waitForUploadButtonRelease();
+      initSerialIfNeeded(/*withLogDelay=*/true);
+      battery::begin();
+      rtcClockAvailable = rtc_clock::beginTimeOnly();
+      logBootSummary(cause, wakeSource);
+      enterStayAwakeMode();
+      return;
+    }
+
+    // Short press → upload.
+    initSerialIfNeeded(/*withLogDelay=*/false);
+    initSubsystems(/*needFullRtc=*/false);
+    logBootSummary(cause, wakeSource);
+    handleUploadWake(true);
+    if (shouldStayAwake()) {
+      enterStayAwakeMode();
+      return;
+    }
+    enterDeepSleep();
+    return;
+  }
+
+  // Cold / non-GPIO boot.
+  initSerialIfNeeded(/*withLogDelay=*/true);
+  initSubsystems(/*needFullRtc=*/false);
+  logBootSummary(cause, wakeSource);
+
+  if (rtcClockAvailable) {
+    rtc_clock::scheduleNextWakeAlarm();
+  }
+
+  if (!shouldStayAwake()) {
+    enterDeepSleep();
+    return;
+  }
+
+  enterStayAwakeMode();
 }
 
 void loop() {

@@ -1,22 +1,38 @@
 # Meter Buddy documentation
 
-## Living docs
+Agent entry point (basic knowledge + doc links): [../AGENT.md](../AGENT.md).
+
+## Single source of truth
 
 | Doc | Description |
 | --- | --- |
-| [architecture.md](architecture.md) | Monorepo layout and package boundaries |
+| [intent_spec.md](intent_spec.md) | User requirements (no implementation choices) |
+| [firmware/fw_specification.md](firmware/fw_specification.md) | Firmware behavior (user stories, architecture, wake/interrupt flows, hardware assumptions) |
+
+These two documents are normative for product requirements and firmware behavior. Prefer them over archived notes.
+
+## Other living docs
+
+| Doc | Description |
+| --- | --- |
 | [api/upload.md](api/upload.md) | Firmware ↔ backend upload contract |
-| [intent.md](intent.md) | Design intent and product goals |
-| [intent_spec.md](intent_spec.md) | Technical specification from intent |
-| [firmware/wiring.md](firmware/wiring.md) | Hardware wiring |
-| [firmware/input_flows.md](firmware/input_flows.md) | Wake / input flow notes |
-| [firmware/timing.md](firmware/timing.md) | Timing parameters |
+
+Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md) and [api/upload.md](api/upload.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md).
 
 ## Package READMEs
 
-- [Root README](../README.md) — hardware, firmware build/flash
+- [Root README](../README.md) — hardware overview, firmware build/flash
 - [Backend README](../backend/README.md) — API server setup, Docker, tests
 
 ## Archive
 
-Historical planning and status notes live under [archive/](archive/). Prefer the living docs above for current truth.
+Non-normative historical docs under [archive/](archive/):
+
+| File | Former role |
+| --- | --- |
+| [archive/intent.md](archive/intent.md) | Early design intent |
+| [archive/architecture.md](archive/architecture.md) | Monorepo layout notes |
+| [archive/wiring.md](archive/wiring.md) | Hardware wiring (superseded by fw_specification hardware section) |
+| [archive/timing.md](archive/timing.md) | Timing notes (often stale) |
+| [archive/input_flows.md](archive/input_flows.md) | Wake/input flow notes (often stale) |
+| Other files in [archive/](archive/) | Older planning / status snapshots |

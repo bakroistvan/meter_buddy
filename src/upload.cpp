@@ -24,14 +24,48 @@ String iso8601(uint32_t unixTime) {
   return String(out);
 }
 
-String buildBody(const storage::UploadBatch &batch) {
+String errorMessage(const char *code) {
+  if (strcmp(code, "no_data") == 0) {
+    return "no unsynced readings";
+  }
+  if (strcmp(code, "crc_mismatch") == 0) {
+    return "record CRC failed";
+  }
+  if (strcmp(code, "storage_unavailable") == 0) {
+    return "storage not ready";
+  }
+  if (strcmp(code, "batch_truncated") == 0) {
+    return "upload batch truncated";
+  }
+  return code != nullptr ? String(code) : String("unknown");
+}
+
+void appendJsonEscaped(String &out, const char *text) {
+  if (text == nullptr) {
+    return;
+  }
+  for (const char *p = text; *p != '\0'; ++p) {
+    const char c = *p;
+    if (c == '"' || c == '\\') {
+      out += '\\';
+    }
+    out += c;
+  }
+}
+
+String buildBody(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
   String body;
-  body.reserve(384 + batch.count * 120);
+  body.reserve(512 + batch.count * 120 + batch.errorCount * 80);
   body += "{\"device_id\":\"";
   body += config::DeviceId;
   body += "\",\"meter_impulses_per_kwh\":";
   body += config::MeterImpulsesPerKwh;
-  body += ",\"upload_trigger\":\"button\",\"readings\":[";
+  body += ",\"upload_trigger\":\"button\"";
+  body += ",\"battery_v\":";
+  body += String(batteryReading.volts, 2);
+  body += ",\"battery_pct_est\":";
+  body += String(batteryReading.percent);
+  body += ",\"readings\":[";
 
   for (uint8_t i = 0; i < batch.count; ++i) {
     const auto &record = batch.records[i];
@@ -54,6 +88,24 @@ String buildBody(const storage::UploadBatch &batch) {
     body += "}";
   }
 
+  body += "],\"errors\":[";
+  for (uint8_t i = 0; i < batch.errorCount; ++i) {
+    const auto &err = batch.errors[i];
+    if (i > 0) {
+      body += ',';
+    }
+    body += "{\"code\":\"";
+    appendJsonEscaped(body, err.code);
+    body += "\",\"message\":\"";
+    appendJsonEscaped(body, errorMessage(err.code).c_str());
+    body += "\"";
+    if (err.detail[0] != '\0') {
+      body += ",\"detail\":\"";
+      appendJsonEscaped(body, err.detail);
+      body += "\"";
+    }
+    body += "}";
+  }
   body += "]}";
   return body;
 }
@@ -115,19 +167,13 @@ bool syncRtcFromNetwork() {
   return false;
 }
 
-Result sendBatch(const storage::UploadBatch &batch) {
+Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
   if (!ensureWifiConnected()) {
     disconnectWifiIfAllowed();
     return Result::WifiFailed;
   }
 
   syncRtcFromNetwork();
-
-  if (batch.count == 0) {
-    logEvent("upload skipped: no data");
-    disconnectWifiIfAllowed();
-    return Result::NoData;
-  }
 
   // Use plain TCP for http://, TLS for https://
   const bool useTls = strncmp(config::UploadUrl, "https://", 8) == 0;
@@ -167,9 +213,10 @@ Result sendBatch(const storage::UploadBatch &batch) {
   http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
   http.addHeader("Content-Type", "application/json");
 
-  const String body = buildBody(batch);
+  const String body = buildBody(batch, batteryReading);
   if (config::EnableSerialLogs) {
-    Serial.printf("upload post start records=%u bytes=%u\n", batch.count, body.length());
+    Serial.printf("upload post start records=%u errors=%u bytes=%u\n",
+                  batch.count, batch.errorCount, body.length());
   }
   const int status = http.POST(body);
   http.end();
@@ -197,8 +244,6 @@ const char *resultName(Result result) {
   switch (result) {
   case Result::Success:
     return "success";
-  case Result::NoData:
-    return "no_data";
   case Result::WifiFailed:
     return "wifi_failed";
   case Result::HttpFailed:

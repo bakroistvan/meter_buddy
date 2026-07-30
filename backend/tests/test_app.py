@@ -181,3 +181,66 @@ def test_invalid_auth_and_payload(tmp_path, monkeypatch):
         )
         assert response.status_code == 422
 
+
+def test_empty_readings_with_errors_and_battery(tmp_path, monkeypatch):
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    with TestClient(app.main.app) as client:
+        payload = {
+            "device_id": "meter-buddy-001",
+            "meter_impulses_per_kwh": 1000,
+            "upload_trigger": "button",
+            "battery_v": 3.87,
+            "battery_pct_est": 62,
+            "readings": [],
+            "errors": [
+                {"code": "no_data", "message": "no unsynced readings"},
+                {
+                    "code": "crc_mismatch",
+                    "message": "record CRC failed",
+                    "detail": "offset=64",
+                },
+            ],
+        }
+
+        response = client.post(
+            "/api/meter-buddy/upload",
+            headers=auth_header(),
+            json=payload,
+        )
+        assert response.status_code == 201
+        assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 0}
+
+        dump = client.get("/dumps/1.json")
+        assert dump.status_code == 200
+        body = dump.json()
+        assert body["readings"] == []
+        assert body["battery_v"] == 3.87
+        assert body["battery_pct_est"] == 62
+        assert body["errors"][0]["code"] == "no_data"
+        assert body["errors"][1]["detail"] == "offset=64"
+
+        rejected = client.post(
+            "/api/meter-buddy/upload",
+            headers=auth_header(),
+            json={
+                "device_id": "meter-buddy-001",
+                "meter_impulses_per_kwh": 1000,
+                "readings": [],
+                "errors": [
+                    {
+                        "code": "no_data",
+                        "message": "no unsynced readings",
+                        "extra_field": "nope",
+                    }
+                ],
+            },
+        )
+        assert rejected.status_code == 422
+

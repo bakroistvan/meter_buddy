@@ -1,12 +1,12 @@
 #pragma once
 
 #include "storage.h"
+#include "battery.h"
 
 namespace upload {
 
 enum class Result {
   Success,
-  NoData,
   WifiFailed,
   HttpFailed,
   ServerRejected,
@@ -14,7 +14,7 @@ enum class Result {
 
 bool ensureWifiConnected();
 bool syncRtcFromNetwork();
-Result sendBatch(const storage::UploadBatch &batch);
+Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &battery);
 const char *resultName(Result result);
 void checkFirmwareUpdate();
 

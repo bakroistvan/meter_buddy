@@ -9,9 +9,9 @@ Battery-powered ESP32-C3 firmware for counting electricity meter LED pulses and 
 | `include/`, `src/`, `platformio.ini` | Firmware (PlatformIO / Arduino) |
 | `tools/`, `meter_buddy.bat` | Firmware build/flash helper CLI |
 | `backend/` | FastAPI upload receiver, SQLite store, index UI |
-| `docs/` | Living docs (intent, API contract, wiring, architecture) |
+| `docs/` | Living docs (intent_spec, fw_specification, API contract) |
 
-See [docs/README.md](docs/README.md) for the full documentation index and [docs/architecture.md](docs/architecture.md) for package boundaries.
+See [docs/README.md](docs/README.md) for the documentation index. Package boundaries are summarized in this table; historical monorepo notes are in [docs/archive/architecture.md](docs/archive/architecture.md).
 
 ## Hardware Target
 
@@ -140,7 +140,7 @@ Or run with a local venv (see [backend/README.md](backend/README.md)).
 
 ## Hardware wiring
 
-See [docs/firmware/wiring.md](docs/firmware/wiring.md).
+Normative pin map and hardware assumptions: [docs/firmware/fw_specification.md](docs/firmware/fw_specification.md) (Hardware assumptions). Historical wiring notes: [docs/archive/wiring.md](docs/archive/wiring.md).
 
 ## Current Firmware Notes
 
@@ -149,5 +149,5 @@ See [docs/firmware/wiring.md](docs/firmware/wiring.md).
 - The TEMT6000 is expected to be always powered from 3.3V; otherwise it cannot wake the MCU on a pulse.
 - If pulses arrive within `PulseAwakeThresholdMs`, firmware stays awake and counts interrupts until `PulseAwakeQuietMs` elapses, avoiding repeated deep-sleep churn during high load.
 - Upload button sessions also perform NTP sync and adjust the DS3231 before returning to sleep.
-- The diagnostics path stays awake on USB/power-on by default. Set `StayAwakeOnUsbBoot = false` for production.
+- The diagnostics path stays awake on power-on by default (and whenever a PC asserts Serial DTR/RTS). Set `StayAwakeBoot = false` for production, or long-press the upload button for 4s to toggle the persisted preference.
 - RTC time-setting and richer serial provisioning are not implemented yet; current config is compile-time via `local_config.h`.

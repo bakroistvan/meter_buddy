@@ -1,98 +1,124 @@
-# meter_buddy — Technical Specification & Implementation Plan
+# Meter Buddy — Intent Specification (User Requirements)
 
-This document translates the high-level design goals from [intent.md](intent.md) into a concrete technical specification and implementation plan, incorporating the proposed unified storage architecture (LittleFS) and OTA update capabilities.
+**Status:** requirements only. No pin maps, libraries, storage media, protocols, or other implementation choices.  
+**Derived from / paired with:** [firmware/fw_specification.md](firmware/fw_specification.md) (how firmware realizes these intents today).  
+**Historical product notes:** [archive/intent.md](archive/intent.md) (non-normative).
 
----
+This document states **what users and operators need the device to do**. Solutions may change; these intents should remain stable unless the product goals change.
 
-## 1. Hardware & Pinout Specification
-
-The device targets the ESP32-C3 microcontroller (Seeed Studio XIAO ESP32C3) with 4 MB of internal flash.
-
-**Pin Assignments (from include/pins.h):**
-- **A0 (GPIO2)**: BatteryAdcWakePin / BatteryAdcPin — ADC input for battery voltage divider.
-- **D0 / A0 (GPIO2)**: BatteryAdcWakePin / BatteryAdcPin — ADC input for battery voltage divider.
-- **D2 (GPIO4)**: PulseWakePin — Light/pulse sensor input (active HIGH). Must be deep-sleep wake capable.
-- **D3 (GPIO5)**: RtcWakePin — DS3231 RTC interrupt/SQW output (active LOW). Triggers periodic 60-second wakeups.
-- **D4 (GPIO6)**: I2cSdaPin — I2C SDA (for RTC).
-- **D5 (GPIO7)**: I2cSclPin — I2C SCL (for RTC).
-- **D1 (GPIO3)**: UploadButtonPin — User button (active LOW, internal pull-up, deep-sleep wake capable).
-- **D9 (GPIO9)**: PulseLedPin — Dedicated pulse indicator LED, flashed briefly for each accepted pulse.
-- **D10 (GPIO10)**: AwakeLedPin — Debug/status LED.
-
-*Note: The external AT24C32 EEPROM chip on the I2C bus will be deprecated and removed from the BOM in favor of internal flash storage.*
+Together with [firmware/fw_specification.md](firmware/fw_specification.md), this is the **single source of truth** for product requirements and firmware behavior.
 
 ---
 
-## 2. Storage Architecture
+## 1. Product purpose
 
-To address flash wear limits and ensure data resilience, storage is split into two tiers using the ESP32-C3's capabilities:
-
-### Tier 1: Hot Accumulation (RTC RAM)
-- **Mechanism:** Data is stored in RTC_DATA_ATTR variables, which persist through deep sleep but are lost on complete power failure.
-- **State Stored:** Current window's pulse count (currentPulses), window start time (currentPeriodStart), and last pulse timestamp.
-- **Lifecycle:** Mutated on every pulse wake (avoiding flash wear). Flushed to Tier 2 only when the 60-second RTC alarm fires.
-
-### Tier 2: Committed Records (LittleFS)
-- **Mechanism:** A single LittleFS partition on the ESP32 internal flash, replacing both the EEPROM ring buffer and NVS cold storage.
-- **Partitioning:** ~1.5 MB LittleFS partition, leaving room for two 1.2 MB OTA app partitions.
-- **File Structure:** 
-  - An append-only log file (/records.bin) for reading records (timestamp, pulses, battery mV).
-  - A sync pointer file (/sync.dat) tracking which records have been acknowledged by the server.
-- **Lifecycle:** Written to once per minute (RTC wake). Truncated or compacted only after a successful upload. Wear-leveling is handled automatically by LittleFS.
+1. The device attaches to a utility electricity meter and records energy use by counting the meter’s optical pulses.
+2. It runs unattended for long periods on battery, with rare manual interaction.
+3. Recorded consumption is uploaded to a backend for storage and analysis when the user requests it.
 
 ---
 
-## 3. Power & State Management
+## 2. Core quality goals
 
-The device operates primarily in ESP32 deep sleep, waking only on specific GPIO triggers:
-
-1. **Pulse Wake (GPIO4 LOW):**
-   - Increment pulse count in RTC RAM.
-   - If pulses are rapid, stay awake briefly to accumulate before sleeping.
-2. **RTC Wake (GPIO5 LOW):**
-   - Fires every 60 seconds.
-   - Read battery voltage (A0).
-   - Package current RTC RAM state into a record and append to LittleFS.
-   - Reset RTC RAM counters and schedule next DS3231 alarm.
-3. **Button Wake (GPIO3 LOW):**
-   - Short press: Trigger Wi-Fi connection and upload batch.
-   - Long press (4s): Enter diagnostic mode (stay awake, pulse LED, accept serial commands).
+| ID | Requirement |
+| --- | --- |
+| Q-1 | **Battery life:** The device must spend almost all time in the deepest practical sleep, waking only for meter pulses, periodic housekeeping, or user action. |
+| Q-2 | **Pulse integrity:** Every accepted meter pulse must be counted before returning to sleep. |
+| Q-3 | **Committed durability:** Completed measurement periods that have not been acknowledged by the backend must survive power loss and remain until a successful upload. |
+| Q-4 | **Hot-window tolerance:** Loss of the *current incomplete* period on sudden power cut is acceptable (at most one period of data). |
+| Q-5 | **Self-healing:** Unexpected reboot, brown-out, and moderate clock drift must not require user repair for normal pulse counting and later upload. |
+| Q-6 | **Simple UX:** A single button covers primary user actions (upload vs maintenance). |
+| Q-7 | **Hot-state write endurance:** Frequently mutating pulse/window state must not be written to wear-prone storage on every pulse; use high-endurance memory, distribute writes, or avoid flash for that hot state. |
 
 ---
 
-## 4. Upload & OTA Model
+## 3. Measurement requirements
 
-- **Upload Trigger:** Manual short button press.
-- **Flow:**
-  1. Wake up and roll the current period if any pulses exist.
-  2. Connect to Wi-Fi.
-  3. Sync time via NTP and update the DS3231 RTC.
-  4. Read a batch of unacknowledged records from LittleFS.
-  5. POST JSON payload to the backend via HTTPS.
-  6. On HTTP 200/201, advance the sync pointer in LittleFS and delete acknowledged records.
-- **OTA Updates (HTTPUpdate):**
-  - Following a successful data upload, the device queries a /firmware/version endpoint.
-  - If a newer version is available, it pulls the .bin via HTTPS.
-  - The firmware is flashed to the inactive OTA slot (pp1), and the device reboots.
+| ID | Requirement |
+| --- | --- |
+| M-1 | Pulses are proportional to energy; the meter’s impulses-per-kWh is a configured property of the installation. |
+| M-2 | Pulses accumulate into fixed-length time windows (period length is a product parameter; currently one minute). |
+| M-3 | At the end of each window with activity, one record exists: time, pulse count, and battery condition. |
+| M-4 | Sub-period resolution is not required; one record per window is sufficient. |
+| M-5 | Short isolated pulses must be recorded with minimal awake time. |
+| M-6 | When pulses arrive in rapid succession, the device must still count them accurately (including while briefly staying awake), then return to sleep when the meter is quiet again. |
 
 ---
 
-## 5. Implementation Plan
+## 4. Wake / event requirements
 
-The transition to this architecture can be executed in three phases to ensure stability:
+| ID | Requirement |
+| --- | --- |
+| W-1 | While asleep, the device must wake on: meter pulse, periodic housekeeping signal, and user button. |
+| W-2 | After handling a wake, the device must return to sleep unless the user has requested continuous awake/diagnostics, or an attached debug host requires it on paths that evaluate that policy (cold boot / upload / long-press). Housekeeping and isolated pulse wakes may return to sleep even if a debug host is present. |
+| W-3 | Housekeeping must close the current period (if any pulses), capture battery state, and arm the next housekeeping wake. |
+| W-4 | When multiple wake reasons are pending at the same moment, the device must apply a deterministic priority so behavior is predictable. |
+| W-5 | While a wake is being handled, additional events must not corrupt counts or storage; pulses that can be captured during a long handler (e.g. upload) should still be counted; events that cannot be handled concurrently may be deferred to a later opportunity without corrupting prior data. |
+| W-6 | The device must not enter a tight re-wake loop from a held button or a still-asserted pulse line. |
 
-### Phase 1: Storage Migration (LittleFS)
-1. **Partition Table:** Create partitions.csv configuring two OTA app slots (~1.2 MB each) and one LittleFS data slot (~1.5 MB). Update platformio.ini to use it.
-2. **Remove EEPROM Logic:** Delete src/storage.cpp (EEPROM ring buffer) and src/cold_storage.cpp (NVS).
-3. **Implement LittleFS Storage:** Create a new storage.cpp backed by LittleFS. Implement an append-only log for records and a robust sync pointer update mechanism.
-4. **Hot Counters:** Ensure currentPulses and currentPeriodStart are strictly maintained in RTC_DATA_ATTR and only written to LittleFS on the 60s boundary.
+---
 
-### Phase 2: OTA Implementation
-1. **HTTPUpdate Integration:** Update upload.cpp to include the HTTPUpdate.h workflow.
-2. **Backend API Check:** Implement the sequence to check for a new version after a successful data upload.
-3. **Rollback Safety:** Add esp_ota_mark_app_valid_cancel_rollback() in setup() to ensure bad OTA updates automatically revert on crash.
+## 5. User interaction requirements
 
-### Phase 3: Cleanup & Optimization
-1. **Hardware Update:** Update documentation (and eventually hardware revisions) to reflect the removal of the I2C EEPROM.
-2. **Diagnostics:** Update the serial REPL commands (dump, status, clear) to interface with the new LittleFS storage.
-3. **Power Tuning:** Verify sleep currents with the new partition and flash layout to ensure no regressions.
+| ID | Requirement |
+| --- | --- |
+| U-1 | **Short press:** Trigger upload of pending data (and a heartbeat even when there is nothing to send). |
+| U-2 | **Long press:** Toggle “stay awake / diagnostics” without uploading. |
+| U-3 | Stay-awake mode keeps the device awake for inspection, live pulse indication, and operator commands over a serial console. |
+| U-4 | The operator must be able to exit stay-awake and return the device to normal sleeping operation. |
+| U-5 | With a debug host connected over USB serial, the device may remain awake for development without requiring the stay-awake flag. |
+| U-6 | Visible indicators must distinguish at least: idle awake, pulse seen, housekeeping, upload in progress, upload failure, stay-awake enabled, stay-awake disabled. |
+
+---
+
+## 6. Upload requirements
+
+| ID | Requirement |
+| --- | --- |
+| P-1 | Uploads are initiated by the user (short press), not on a continuous network schedule. |
+| P-2 | On upload, the device must close the current period if needed, connect to the network, refresh time from the network when possible, and send pending records. |
+| P-3 | Records are sent in bounded batches; remaining records drain on later successful uploads. |
+| P-4 | A record may be discarded locally only after the backend has acknowledged it. |
+| P-5 | Network or protocol failure must retain records and give clear failure feedback. |
+| P-6 | An empty successful heartbeat (nothing to upload) is allowed and is not treated as a user-facing failure. |
+| P-7 | Upload attempts may report storage/integrity problems alongside readings so the backend and operator can see device health. |
+| P-8 | After a successful upload that delivered readings, the device may check for a newer firmware image when connectivity still allows it. |
+
+---
+
+## 7. Diagnostics requirements
+
+| ID | Requirement |
+| --- | --- |
+| D-1 | Operators can inspect stored records, battery, input levels, and time while awake. |
+| D-2 | Operators can clear stored data when deliberately requested. |
+| D-3 | Operators can force an upload and reboot from the console. |
+| D-4 | Serial logging is available for troubleshooting and may be disabled in production builds to save power. |
+
+---
+
+## 8. Constraints and non-goals
+
+| ID | Requirement |
+| --- | --- |
+| N-1 | No on-device display; the backend is the primary data consumer. |
+| N-2 | Single meter, single optical sensor. |
+| N-3 | Unacknowledged committed records must be retained on-device **indefinitely until a successful upload acknowledges them**. Flash capacity is a practical limit; the device must not silently discard unacked records to free space. |
+| N-4 | **USB flashing is the primary** way to install firmware. **Network OTA is allowed** as an optional step after a successful data upload when connectivity still permits it — not forbidden. |
+
+---
+
+## 9. Acceptance mapping (intent → observable behavior)
+
+| Intent | Observable acceptance |
+| --- | --- |
+| Q-1 / W-2 | After pulse or housekeeping, device returns to sleep unless stay-awake/USB applies. |
+| Q-7 | Pulse wakes update hot counters without a LittleFS write per pulse. |
+| M-5 / M-6 | Isolated pulse increments by one; burst trains are fully counted then sleep after quiet. |
+| W-4 / W-5 | Documented priority when button+RTC (+pulse) coincide; no corrupt records; deferred sources handled later. |
+| U-1 / U-2 | Short press uploads; long press toggles stay-awake without upload. |
+| P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
+| P-6 | Empty heartbeat succeeds without error indication. |
+| P-8 / N-4 | After successful upload with readings, OTA check may run; USB flash remains a valid install path. |
+
+When firmware behavior and [fw_specification.md](firmware/fw_specification.md) disagree with this intent, **intent wins for product decisions**; when they disagree only on how something is implemented, **fw_specification + code** win until intent is consciously revised.

@@ -1,0 +1,40 @@
+---
+description: When a feature or behavior changes, spawn a subagent to update SoT specs
+alwaysApply: true
+---
+
+# Keep specs in sync with feature changes
+
+When you change **user-visible or behavioral** firmware/backend behavior (wake/sleep, pulses, upload, LEDs, storage, stay-awake, API payload/contract), do **not** leave the docs stale.
+
+## Required action
+
+After (or as part of) the feature work, **spawn a dedicated subagent** (`Task` tool) whose only job is to update the normative docs to match the new code.
+
+Point the subagent at the right SoT files:
+
+| Change area | Update |
+| --- | --- |
+| Product requirements / goals / constraints | [docs/intent_spec.md](docs/intent_spec.md) |
+| Firmware behavior, wakes, concurrency, hardware assumptions | [docs/firmware/fw_specification.md](docs/firmware/fw_specification.md) |
+| Upload JSON / HTTP contract | [docs/api/upload.md](docs/api/upload.md) |
+
+## Subagent brief (use this shape)
+
+```text
+Feature change summary: <what changed>
+Code touched: <paths>
+Update normative docs to match code. Prefer intent_spec for requirements-only
+deltas; fw_specification for how firmware behaves now; api/upload.md for
+wire contract. Do not invent behavior not in code. Cite what you changed.
+Ignore docs/archive/ except as historical reference.
+```
+
+## Do / don't
+
+- **Do** spawn the subagent even for small behavior tweaks (LED meaning, wake priority, upload error paths).
+- **Do** keep intent_spec free of pin maps / library choices; put those in fw_specification.
+- **Don't** treat `docs/archive/` as living truth.
+- **Don't** skip the subagent because the parent agent “already knows” the docs — use a separate pass so the SoT stays aligned.
+
+Pure refactors with **no** behavior or contract change do not need a spec update.

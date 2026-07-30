@@ -12,87 +12,102 @@ public:
   };
 
   void init() {
-    pinMode(pins::AwakeLedPin, OUTPUT);
-    digitalWrite(pins::AwakeLedPin, LOW);
+    ledcSetup(PwmChannel, PwmFreqHz, PwmResolutionBits);
+    ledcAttachPin(pins::AwakeLedPin, PwmChannel);
+    pwmAttached = true;
+    writeDuty(DutyOff);
   }
 
   void setMode(Mode newMode) {
     mode = newMode;
   }
 
+  // Idle-awake indicator: 50% PWM.
   void setAwake() {
-    if (mode == Mode::WakeFromDeepSleep) {
-      digitalWrite(pins::AwakeLedPin, HIGH);
-    }
+    ensurePwm();
+    writeDuty(DutyAwake);
   }
 
   void setSleep() {
-    digitalWrite(pins::AwakeLedPin, LOW);
+    writeDuty(DutyOff);
+    if (pwmAttached) {
+      ledcDetachPin(pins::AwakeLedPin);
+      pwmAttached = false;
+    }
     pinMode(pins::AwakeLedPin, INPUT_PULLDOWN);
   }
 
+  // Full brightness — used for upload-in-progress.
   void setOn() {
-    digitalWrite(pins::AwakeLedPin, HIGH);
+    ensurePwm();
+    writeDuty(DutyFull);
   }
 
   void setOff() {
-    digitalWrite(pins::AwakeLedPin, LOW);
+    ensurePwm();
+    writeDuty(DutyOff);
   }
 
+  // One full flash, then restore previous duty (usually 50% awake).
   void blink() {
-    if (mode == Mode::WakeFromDeepSleep) {
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-    } else {
-      digitalWrite(pins::AwakeLedPin, HIGH);
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, LOW);
-    }
+    pulse(1);
   }
 
+  // Two full flashes, then restore previous duty.
   void doubleBlink() {
-    if (mode == Mode::WakeFromDeepSleep) {
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-    } else {
-      digitalWrite(pins::AwakeLedPin, HIGH);
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, LOW);
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, HIGH);
-      delay(100);
-      digitalWrite(pins::AwakeLedPin, LOW);
-    }
+    pulse(2);
   }
 
+  // Error pattern: rapid full/off flashes, then restore previous duty.
   void rapidErrorBlink() {
-    if (mode == Mode::WakeFromDeepSleep) {
-      for (uint8_t i = 0; i < 10; ++i) {
-        digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-        delay(100);
-        digitalWrite(pins::AwakeLedPin, !digitalRead(pins::AwakeLedPin));
-        delay(100);
-      }
-    } else {
-      for (uint8_t i = 0; i < 10; ++i) {
-        digitalWrite(pins::AwakeLedPin, HIGH);
-        delay(100);
-        digitalWrite(pins::AwakeLedPin, LOW);
-        delay(100);
-      }
-    }
+    pulse(10);
   }
 
   bool isOn() const {
-    return digitalRead(pins::AwakeLedPin) == HIGH;
+    return currentDuty > DutyOff;
+  }
+
+  bool isFull() const {
+    return currentDuty >= DutyFull;
   }
 
 private:
+  static constexpr uint8_t PwmChannel = 0;
+  static constexpr uint32_t PwmFreqHz = 5000;
+  static constexpr uint8_t PwmResolutionBits = 8;
+  static constexpr uint32_t DutyOff = 0;
+  static constexpr uint32_t DutyAwake = 77; // 30%
+  static constexpr uint32_t DutyFull = 255;
+  static constexpr uint32_t PulseMs = 100;
+
   Mode mode = Mode::AlwaysAwake;
+  uint32_t currentDuty = DutyOff;
+  bool pwmAttached = false;
+
+  void ensurePwm() {
+    if (pwmAttached) {
+      return;
+    }
+    pinMode(pins::AwakeLedPin, OUTPUT);
+    ledcSetup(PwmChannel, PwmFreqHz, PwmResolutionBits);
+    ledcAttachPin(pins::AwakeLedPin, PwmChannel);
+    pwmAttached = true;
+  }
+
+  void writeDuty(uint32_t duty) {
+    ledcWrite(PwmChannel, duty);
+    currentDuty = duty;
+  }
+
+  void pulse(uint8_t count) {
+    ensurePwm();
+    const uint32_t previous = currentDuty;
+    for (uint8_t i = 0; i < count; ++i) {
+      writeDuty(DutyFull);
+      delay(PulseMs);
+      writeDuty(DutyOff);
+      delay(PulseMs);
+    }
+    writeDuty(previous);
+  }
 };

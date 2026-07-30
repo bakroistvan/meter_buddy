@@ -12,11 +12,11 @@ Shared contract between ESP32 firmware (`src/upload.cpp`) and the backend (`POST
 | Content-Type | `application/json` |
 | Success | `201 Created` (also treat `200` as success on the device) |
 
-Firmware only advances its sync cursor on HTTP **200** or **201**.
+Firmware only advances its sync cursor on HTTP **200** or **201** after a batch that included readings.
 
 ## Request body
 
-Unknown fields are rejected (`extra = forbid` on the backend).
+Unknown fields are rejected (`extra = forbid` on the backend). Empty `readings` are allowed (heartbeat / error-only upload).
 
 ```json
 {
@@ -29,8 +29,14 @@ Unknown fields are rejected (`extra = forbid` on the backend).
     {
       "timestamp": "2026-05-01T13:00:00Z",
       "period_start": "2026-05-01T12:00:00Z",
-      "pulses": 42
+      "pulses": 42,
+      "battery_v": 3.87,
+      "battery_pct_est": 62
     }
+  ],
+  "errors": [
+    { "code": "no_data", "message": "no unsynced readings" },
+    { "code": "crc_mismatch", "message": "record CRC failed", "detail": "offset=64" }
   ]
 }
 ```
@@ -40,9 +46,10 @@ Unknown fields are rejected (`extra = forbid` on the backend).
 | `device_id` | string | yes | 1–80 chars |
 | `meter_impulses_per_kwh` | int | yes | Must be `> 0` |
 | `upload_trigger` | string \| null | no | Firmware currently sends `"button"`; max 40 chars |
-| `battery_v` | float \| null | no | Volts; must be `>= 0` if present |
-| `battery_pct_est` | int \| null | no | 0–100 if present |
+| `battery_v` | float \| null | no | Top-level live sample; volts; `>= 0` if present |
+| `battery_pct_est` | int \| null | no | Top-level estimate; 0–100 if present |
 | `readings` | array | yes (may be empty) | List of period records |
+| `errors` | array | no (default `[]`) | Device-side issues discovered while building the batch |
 
 ### Reading object
 
@@ -51,6 +58,27 @@ Unknown fields are rejected (`extra = forbid` on the backend).
 | `timestamp` | ISO-8601 datetime | yes | Period end (UTC `Z` from firmware) |
 | `period_start` | ISO-8601 datetime \| null | no | Period start |
 | `pulses` | int | yes | `>= 0` |
+| `battery_v` | float \| null | no | Per-reading battery volts |
+| `battery_pct_est` | int \| null | no | Per-reading estimate; 0–100 |
+
+### Error object
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `code` | string | yes | Stable machine code (see below) |
+| `message` | string | yes | Short human-readable text |
+| `detail` | string \| null | no | Extra context (e.g. byte offset) |
+
+Stable `code` values from firmware:
+
+| Code | Meaning |
+| --- | --- |
+| `no_data` | Zero unsynced readings after roll |
+| `crc_mismatch` | Bad CRC while scanning `/records.bin` (`detail` includes offset) |
+| `storage_unavailable` | LittleFS/storage not ready |
+| `batch_truncated` | More unsynced records than one upload batch |
+
+Errors are stored in the dump `raw_json` (no dedicated SQL table in v1).
 
 ## Success response
 
@@ -66,7 +94,7 @@ Unknown fields are rejected (`extra = forbid` on the backend).
 | --- | --- | --- |
 | `ok` | bool | Always `true` on success |
 | `dump_id` | int | SQLite `upload_dumps.id` |
-| `stored_readings` | int | Number of readings persisted |
+| `stored_readings` | int | Number of readings persisted (`0` for empty heartbeats) |
 
 ## Error responses
 

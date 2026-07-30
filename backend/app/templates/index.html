@@ -317,6 +317,14 @@
         return html;
       }
 
+      function formatReceivedAt(isoUtc) {
+        var d = new Date(isoUtc);
+        if (isNaN(d.getTime())) return isoUtc;
+        var pad = function (n) { return String(n).padStart(2, "0"); };
+        return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+          " " + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
+      }
+
       function buildRow(dump) {
         var row = document.createElement("tr");
         row.className = "dump-row";
@@ -324,7 +332,7 @@
         row.innerHTML =
           "<td>" + dump.id + "</td>" +
           "<td>" + escapeHtml(dump.device_id) + "</td>" +
-          "<td>" + escapeHtml(dump.received_at) + "</td>" +
+          "<td>" + escapeHtml(formatReceivedAt(dump.received_at)) + "</td>" +
           "<td>" + dump.reading_count + "</td>" +
           "<td>" + batteryCell(dump) + "</td>" +
           "<td><a href='/dumps/" + dump.id + ".json'>JSON</a></td>" +

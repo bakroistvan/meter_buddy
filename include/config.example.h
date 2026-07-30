@@ -34,13 +34,14 @@ constexpr uint32_t PulseAwakeQuietMs = 30000; // Time with no pulses before retu
 constexpr uint32_t PulseDebounceMs = 50; // Debounce time for pulse detection (ms)
 constexpr uint32_t AwakePulseFlushMs = 5000; // Interval for flushing counted pulses to storage while awake (ms)
 constexpr uint32_t WifiReconnectIntervalMs = 10000; // Interval for checking and reconnecting WiFi (ms)
+constexpr uint32_t UploadLongPressMs = 4000; // Hold upload button this long to toggle StayAwakeBoot
 
 // RTC wake interval in seconds. Default 60.
 constexpr uint16_t RtcWakeIntervalSeconds = 60;
 
 constexpr bool EnableDeepSleep = true;
 constexpr bool KeepWifiConnectedWhenAwake = false;
-constexpr bool StayAwakeOnUsbBoot = true;
+constexpr bool StayAwakeBoot = false;
 constexpr bool EnableSerialLogs = true;
 
 } // namespace config
