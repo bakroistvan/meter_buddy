@@ -87,16 +87,22 @@ $env:PLATFORMIO_CORE_DIR='.\.platformio-core'
 
 Every push or pull request that changes the firmware sources triggers a GitHub Actions workflow that builds the PlatformIO firmware and uploads the resulting binary artifacts from the run summary.
 
-The workflow is defined in [.github/workflows/build-firmware.yml](.github/workflows/build-firmware.yml) and publishes:
+The workflow is defined in [.github/workflows/build-firmware.yml](.github/workflows/build-firmware.yml). Artifact filenames include the firmware version (from the git tag on tagged/release builds, otherwise `git describe --tags --always`):
 
-- `firmware.bin`
-- `firmware.elf`
-- `partitions.bin`
+| Artifact | Naming |
+| --- | --- |
+| Flash image | `meter-buddy-fw-<version>.bin` |
+| ELF | `meter-buddy-fw-<version>.elf` |
+| Partition table | `meter-buddy-fw-<version>-partitions.bin` |
+
+Example for tag `v1.2.3`: `meter-buddy-fw-v1.2.3.bin`, `meter-buddy-fw-v1.2.3.elf`, `meter-buddy-fw-v1.2.3-partitions.bin`.
+
+Unversioned PlatformIO names (`firmware.bin`, etc.) are no longer published as CI/release assets.
 
 To flash the downloaded artifact to the device locally:
 
-1. Download the `firmware-bin` artifact from the GitHub Actions run.
-2. Extract the archive and locate the `firmware.bin` file.
+1. Download the `firmware-bin` artifact from the GitHub Actions run (or the matching asset from a GitHub Release).
+2. Extract the archive and locate the `meter-buddy-fw-*.bin` file.
 3. Connect the ESP32-C3 over USB.
 4. Run the PlatformIO uploader or the helper script with the binary:
 
@@ -107,8 +113,16 @@ To flash the downloaded artifact to the device locally:
 If you prefer to flash a specific binary manually, use the Espressif uploader with the board's serial port:
 
 ```powershell
-esptool.py --chip esp32c3 --port COM5 --baud 460800 write_flash 0x0 firmware.bin
+esptool.py --chip esp32c3 --port COM5 --baud 460800 write_flash 0x0 meter-buddy-fw-v1.2.3.bin
 ```
+
+### Firmware release checklist
+
+1. Confirm the change set to ship is on the branch you will tag.
+2. Create and push a semver tag: `v<major>.<minor>.<patch>` (for example `v1.2.3`). The build workflow runs on `v*` tags.
+3. Wait for [Build firmware](.github/workflows/build-firmware.yml) to finish; it smoke-checks that each file under `dist/` contains the resolved version string.
+4. Confirm the GitHub Release assets use the `meter-buddy-fw-<version>.*` names above (not bare `firmware.bin`).
+5. Optionally bump `config::FirmwareVersion` in `include/local_config.h` / `config.example.h` so OTA current-version reporting matches the tag; release asset naming always comes from the git tag, not that constant.
 
 ## Upload Flow
 
