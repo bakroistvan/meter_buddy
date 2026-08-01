@@ -39,6 +39,9 @@ constexpr uint32_t UploadLongPressMs = 4000; // Hold upload button this long to 
 // RTC wake interval in seconds. Default 60.
 constexpr uint16_t RtcWakeIntervalSeconds = 60;
 
+// Pause after forcing Wi-Fi off before ADC sample used for RTC roll / upload.
+constexpr uint32_t BatteryAdcSettleMs = 80;
+
 constexpr bool EnableDeepSleep = true;
 constexpr bool KeepWifiConnectedWhenAwake = false;
 constexpr bool StayAwakeBoot = false;
