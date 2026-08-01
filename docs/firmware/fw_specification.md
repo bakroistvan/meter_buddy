@@ -30,7 +30,7 @@ This document describes **what the firmware does today**, including architecture
 ### US-4 — Short upload button press
 **Given** sleep or an awake session,  
 **When** the upload button is pressed and released before `UploadLongPressMs` (4 s),  
-**Then** the status LED runs `startPulseBlink` (toggles dim awake ↔ full every 400 ms), `flushAwakePulses(true)` folds any ISR pulses still only in `awakePulseCount` into the open hot period, then one `battery::sampleForRecord()` supplies mV for `rollCurrentPeriod` (local `ReadingRecord.batteryMv` only — not on the wire) and the same reading for top-level upload `battery_v` / `battery_pct_est` on the **first** `sendBatch` POST of the session (≤48 readings); follow-up truncated batches omit those keys (`nullptr` to `buildBody`). Wi‑Fi connects, NTP syncs the RTC, JSON POST(s) run (including an empty heartbeat when there are no readings), the sync cursor advances only for batches that contained readings and received HTTP 200/201; a post-upload `flushAwakePulses(true)` credits pulses that arrived during Wi‑Fi/upload into the **new** open period (not this POST); on network/HTTP failure the status LED does `rapidErrorBlink`; then `setAwake` restores dim idle PWM and the device sleeps unless stay-awake is active.
+**Then** the status LED runs `startPulseBlink` (toggles dim awake ↔ full every 400 ms), `flushAwakePulses(true)` folds any ISR pulses still only in `awakePulseCount` into the open hot period, then one `battery::sampleForRecord()` supplies mV for `rollCurrentPeriod` (local `ReadingRecord.batteryMv` only — not on the wire) and the same reading for top-level upload `battery_v` / `battery_pct_est` on the **first** `sendBatch` POST of the session (≤48 readings); follow-up truncated batches omit those keys (`nullptr` to `buildBody`). `handleUploadWake` owns one radio session: `ensureWifiConnected` once, `syncRtcFromNetwork` once (best-effort), then one or more JSON POSTs reuse the connection (including an empty heartbeat when there are no readings); the sync cursor advances only for batches that contained readings and received HTTP 200/201; a post-upload `flushAwakePulses(true)` credits pulses that arrived during Wi‑Fi/upload into the **new** open period (not this POST); on success with readings an optional OTA check may run while Wi‑Fi is still up (US-10); then `disconnectWifiIfAllowed` (no-op when `KeepWifiConnectedWhenAwake`); on network/HTTP failure the status LED does `rapidErrorBlink` before that disconnect; then `setAwake` restores dim idle PWM and the device sleeps unless stay-awake is active.
 
 ### US-5 — Long press toggles stay-awake
 **Given** the upload button is held ≥ 4 s (from deep-sleep wake or while already awake),  
@@ -84,7 +84,7 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 ### US-10 — OTA check after successful data upload
 **Given** an upload succeeded and at least one reading was marked synced,  
 **When** post-upload housekeeping runs,  
-**Then** `upload::checkFirmwareUpdate()` is invoked. (Wi‑Fi is typically powered off after `sendBatch` unless `KeepWifiConnectedWhenAwake`, so the check may no-op if disconnected.)
+**Then** `upload::checkFirmwareUpdate()` is invoked while the upload wake’s Wi‑Fi session is still up; `disconnectWifiIfAllowed` runs afterward (unless `KeepWifiConnectedWhenAwake`). The check no-ops only if Wi‑Fi is already disconnected (e.g. connect failed earlier, or the radio dropped and was not restored).
 
 ---
 
@@ -112,7 +112,7 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 | --- | --- |
 | `main.cpp` | Wake dispatch, pulse ISR, button classify, sleep arming, diagnostics REPL |
 | `storage` | Hot counters in `RTC_DATA_ATTR`; LittleFS `/records.bin`, `/sync.dat`, `/stay_awake.dat`; getters `available()`, `currentPulses()`, `currentPeriodStart()`; `hexdump()` prints file hex to a `Stream` |
-| `upload` | Wi‑Fi, NTP→RTC, `buildBody`/`sendBatch` (optional `const battery::Reading*` for top-level battery — `battery_v` at 3 decimal places; readings without battery keys; `errors[]`), OTA version check |
+| `upload` | Session helpers `ensureWifiConnected` / `syncRtcFromNetwork` / `disconnectWifiIfAllowed`; `buildBody`/`sendBatch` (POST-only — may reconnect Wi‑Fi if dropped; no NTP; no disconnect; optional `const battery::Reading*` for top-level battery — `battery_v` at 3 decimal places; readings without battery keys; `errors[]`); OTA version check |
 | `rtc_clock` | DS3231 time + Alarm1 schedule / clear |
 | `battery` | A0 divider ADC: eFuse-calibrated mV × 2; `sample()` immediate; `sampleForRecord()` forces Wi‑Fi off + settle before sample (RTC roll / upload) |
 | `awake_led` | Status LED PWM and blink patterns |
@@ -382,10 +382,11 @@ Deep-sleep wakes are **single-shot**, not nested. Concurrent GPIO assertions col
 
 1. Attach pulse ISR; status LED `startPulseBlink` (400 ms dim ↔ full). Forced upload from wake classify skips the extra 50 ms `uploadButtonPressed` debounce (already classified). Pulse LED flashes (~100 ms) via ISR + off timer for pulses during upload (§5.3); status blink is independent (`esp_timer`).
 2. `flushAwakePulses(true)` so any pulses still only in `awakePulseCount` are written into the open hot period before it rolls.
-3. One `battery::sampleForRecord()`; `rollCurrentPeriod` with that mV (closes the period into LittleFS; `batteryMv` is local storage only, not emitted on readings JSON).
-4. Loop: `loadUploadBatch` → `upload::sendBatch(batch, includeBattery ? &reading : nullptr)` (`buildBody`; connect Wi‑Fi, NTP sync each batch attempt, POST, then disconnect Wi‑Fi unless `KeepWifiConnectedWhenAwake`). `includeBattery` starts true so the first POST of the session gets top-level `battery_v` / `battery_pct_est`; then set false so follow-up truncated batches omit those keys. On Success with `count > 0` → `markSyncedThrough`; continue while `truncated`; stop on empty/non-truncated or failure. With `EnableSerialLogs`, the upload path may also call `storage::hexdump` before/after `rollCurrentPeriod` for serial debug (not the REPL `h` command).
-5. `flushAwakePulses(true)` again so pulses counted during Wi‑Fi/upload enter the **new** open period (not the batch just posted); detach ISR if this path attached it.
-6. Success + had readings → optional OTA check via `upload::checkFirmwareUpdate()` (often no-ops because Wi‑Fi was just powered off); failure → `rapidErrorBlink`; restore dim awake LED. USB flashing remains a valid primary install path.
+3. One `battery::sampleForRecord()`; `rollCurrentPeriod` with that mV (closes the period into LittleFS; `batteryMv` is local storage only, not emitted on readings JSON). With `EnableSerialLogs`, the upload path may also call `storage::hexdump` before/after `rollCurrentPeriod` for serial debug (not the REPL `h` command).
+4. `upload::ensureWifiConnected()` once. On failure, mark the wake failed and skip POSTs/NTP. On success, `upload::syncRtcFromNetwork()` once (best-effort — failure does not abort the wake).
+5. Loop: `loadUploadBatch` → `upload::sendBatch(batch, includeBattery ? &reading : nullptr)` (`buildBody` + HTTPS/HTTP POST only; may call `ensureWifiConnected` again if the link dropped; no NTP; no disconnect). `includeBattery` starts true so the first POST of the session gets top-level `battery_v` / `battery_pct_est`; then set false so follow-up truncated batches omit those keys. On Success with `count > 0` → `markSyncedThrough`; continue while `truncated`; stop on empty/non-truncated or failure.
+6. `flushAwakePulses(true)` again so pulses counted during Wi‑Fi/upload enter the **new** open period (not the batch just posted); detach ISR if this path attached it.
+7. Success + had readings → optional OTA check via `upload::checkFirmwareUpdate()` while Wi‑Fi is still up; failure → `rapidErrorBlink`. Then `upload::disconnectWifiIfAllowed()` (skipped when `KeepWifiConnectedWhenAwake`); restore dim awake LED. USB flashing remains a valid primary install path.
 
 ### Sync cursor and compaction
 

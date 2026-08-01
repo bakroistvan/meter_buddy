@@ -59,6 +59,8 @@ void logEvent(const char *message) {
   }
 }
 
+} // namespace
+
 bool disconnectWifiIfAllowed() {
   if (config::KeepWifiConnectedWhenAwake) {
     return true;
@@ -67,8 +69,6 @@ bool disconnectWifiIfAllowed() {
   WiFi.mode(WIFI_OFF);
   return true;
 }
-
-} // namespace
 
 String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   String body;
@@ -165,11 +165,8 @@ bool syncRtcFromNetwork() {
 
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   if (!ensureWifiConnected()) {
-    disconnectWifiIfAllowed();
     return Result::WifiFailed;
   }
-
-  syncRtcFromNetwork();
 
   // Use plain TCP for http://, TLS for https://
   const bool useTls = strncmp(config::UploadUrl, "https://", 8) == 0;
@@ -185,7 +182,6 @@ Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batt
       tlsClient.setCACert(config::TlsCaCert);
     } else {
       logEvent("upload failed: tls not configured");
-      disconnectWifiIfAllowed();
       return Result::HttpFailed;
     }
     client = &tlsClient;
@@ -202,7 +198,6 @@ Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batt
   http.setTimeout(config::HttpTimeoutMs);
   if (!http.begin(*client, config::UploadUrl)) {
     logEvent("upload failed: http begin");
-    disconnectWifiIfAllowed();
     return Result::HttpFailed;
   }
 
@@ -216,7 +211,6 @@ Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batt
   }
   const int status = http.POST(body);
   http.end();
-  disconnectWifiIfAllowed();
 
   if (status < 0) {
     if (config::EnableSerialLogs) {

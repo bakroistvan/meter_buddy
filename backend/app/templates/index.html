@@ -1077,7 +1077,8 @@
 
         if (closest) {
           telemetryEl.style.display = "flex";
-          document.getElementById("telemetry-time").textContent = formatReceivedAt(closest.time);
+          document.getElementById("telemetry-time").textContent =
+            new Date(closest.time).toISOString().replace("T", " ").slice(0, 19) + " UTC";
           document.getElementById("telemetry-pulses").textContent = closest.pulses + " cnt";
           document.getElementById("telemetry-power").textContent = Number.isFinite(closest.powerW) ? closest.powerW.toFixed(1) + " W" : "n/a";
           document.getElementById("telemetry-kwh").textContent = closest.cumulativeKwh.toFixed(3) + " kWh";

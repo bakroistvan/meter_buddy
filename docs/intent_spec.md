@@ -79,13 +79,13 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | ID | Requirement |
 | --- | --- |
 | P-1 | Uploads are initiated by the user (short press), not on a continuous network schedule. |
-| P-2 | On upload, the device must fold any already-accepted pulses still only in volatile awake counting into the open period, close that period if needed, connect to the network, refresh time from the network when possible, and send pending records. Pulses accepted during the upload itself belong to the new open period, not the batch being posted. |
+| P-2 | On upload, the device must fold any already-accepted pulses still only in volatile awake counting into the open period, close that period if needed, open one network session (connect once, refresh time from the network when possible), and send pending records as one or more POSTs on that session. Pulses accepted during the upload itself belong to the new open period, not the batch being posted. |
 | P-3 | Records are sent in bounded batches; remaining records drain on later successful uploads. |
 | P-4 | A record may be discarded locally only after the backend has acknowledged it. |
 | P-5 | Network or protocol failure must retain records and give clear failure feedback. |
 | P-6 | An empty successful heartbeat (nothing to upload) is allowed and is not treated as a user-facing failure. |
 | P-7 | Upload attempts may report storage/integrity problems alongside readings so the backend and operator can see device health. |
-| P-8 | After a successful upload that delivered readings, the device may check for a newer firmware image when connectivity still allows it. |
+| P-8 | After a successful upload that delivered readings, the device may check for a newer firmware image before releasing the upload network session, when connectivity still allows it. |
 
 ---
 
@@ -124,6 +124,6 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | D-1 | Diagnostics `status` / `dump` expose storage health, open hot period, and rolled-only JSON readings. |
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |
-| P-8 / N-4 | After successful upload with readings, OTA check may run; USB flash remains a valid install path. |
+| P-8 / N-4 | After successful upload with readings, OTA check may run before the upload network session is released; USB flash remains a valid install path. |
 
 When firmware behavior and [fw_specification.md](firmware/fw_specification.md) disagree with this intent, **intent wins for product decisions**; when they disagree only on how something is implemented, **fw_specification + code** win until intent is consciously revised.

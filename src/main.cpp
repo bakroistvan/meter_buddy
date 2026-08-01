@@ -417,41 +417,48 @@ void handleUploadWake(bool force = false) {
   bool includeBattery = true;
   bool uploadSucceeded = true;
   bool uploadedRecords = false;
-  while (true) {
-    storage::UploadBatch batch{};
-    if (!storage::loadUploadBatch(batch)) {
-      logEvent("failed to load upload batch");
-      uploadSucceeded = false;
-      break;
-    }
 
-    if (config::EnableSerialLogs) {
-      if (includeBattery) {
-        Serial.printf("upload batch records=%u errors=%u battery=%.3fV pct=%u\n",
-                      batch.count, batch.errorCount, reading.volts, reading.percent);
-      } else {
-        Serial.printf("upload batch records=%u errors=%u battery=omitted\n",
-                      batch.count, batch.errorCount);
+  if (!upload::ensureWifiConnected()) {
+    logEvent("upload wifi failed before batch");
+    uploadSucceeded = false;
+  } else {
+    upload::syncRtcFromNetwork();
+    while (true) {
+      storage::UploadBatch batch{};
+      if (!storage::loadUploadBatch(batch)) {
+        logEvent("failed to load upload batch");
+        uploadSucceeded = false;
+        break;
       }
-    }
-    const auto result = upload::sendBatch(batch, includeBattery ? &reading : nullptr);
-    includeBattery = false;
-    if (config::EnableSerialLogs) {
-      Serial.printf("upload result=%s records=%u errors=%u\n",
-                    upload::resultName(result), batch.count, batch.errorCount);
-    }
-    if (result != upload::Result::Success) {
-      uploadSucceeded = false;
-      break;
-    }
-    if (batch.count > 0) {
-      uploadedRecords = true;
-      storage::markSyncedThrough(batch.newestSequence);
-      logEvent("upload marked records synced");
-    }
-    // Empty heartbeat or final partial batch: one POST is enough unless truncated.
-    if (batch.count == 0 || !batch.truncated) {
-      break;
+
+      if (config::EnableSerialLogs) {
+        if (includeBattery) {
+          Serial.printf("upload batch records=%u errors=%u battery=%.3fV pct=%u\n",
+                        batch.count, batch.errorCount, reading.volts, reading.percent);
+        } else {
+          Serial.printf("upload batch records=%u errors=%u battery=omitted\n",
+                        batch.count, batch.errorCount);
+        }
+      }
+      const auto result = upload::sendBatch(batch, includeBattery ? &reading : nullptr);
+      includeBattery = false;
+      if (config::EnableSerialLogs) {
+        Serial.printf("upload result=%s records=%u errors=%u\n",
+                      upload::resultName(result), batch.count, batch.errorCount);
+      }
+      if (result != upload::Result::Success) {
+        uploadSucceeded = false;
+        break;
+      }
+      if (batch.count > 0) {
+        uploadedRecords = true;
+        storage::markSyncedThrough(batch.newestSequence);
+        logEvent("upload marked records synced");
+      }
+      // Empty heartbeat or final partial batch: one POST is enough unless truncated.
+      if (batch.count == 0 || !batch.truncated) {
+        break;
+      }
     }
   }
 
@@ -464,6 +471,7 @@ void handleUploadWake(bool force = false) {
   } else {
     awakeLed.rapidErrorBlink();
   }
+  upload::disconnectWifiIfAllowed();
   // Upload blink helpers may leave the pin low; restore while still awake.
   // enterDeepSleep() calls setSleep() when actually sleeping.
   awakeLed.setAwake();
