@@ -23,7 +23,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | ID | Requirement |
 | --- | --- |
 | Q-1 | **Battery life:** The device must spend almost all time in the deepest practical sleep, waking only for meter pulses, periodic housekeeping, or user action. |
-| Q-2 | **Pulse integrity:** Every accepted meter pulse must be counted before returning to sleep. |
+| Q-2 | **Pulse integrity:** Every accepted meter pulse must be counted before returning to sleep. Counting into the current incomplete window must not depend on durable/flash storage being mounted or writable; only committing a completed period requires durable storage. |
 | Q-3 | **Committed durability:** Completed measurement periods that have not been acknowledged by the backend must survive power loss and remain until a successful upload. |
 | Q-4 | **Hot-window tolerance:** Loss of the *current incomplete* period on sudden power cut is acceptable (at most one period of data). |
 | Q-5 | **Self-healing:** Unexpected reboot, brown-out, and moderate clock drift must not require user repair for normal pulse counting and later upload. |
@@ -42,6 +42,9 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | M-4 | Sub-period resolution is not required; one record per window is sufficient. |
 | M-5 | Short isolated pulses must be recorded with minimal awake time. |
 | M-6 | When pulses arrive in rapid succession, the device must still count them accurately (including while briefly staying awake), then return to sleep when the meter is quiet again. |
+| M-7 | Battery condition written onto period records and the live sample attached to an upload must be taken with the radio quiet so Wi‑Fi activity does not skew the ADC; casual diagnostics inspection need not force that condition. |
+
+**Reference meter constant:** The product default / reference installation assumes **1000 pulses per kWh** (`MeterImpulsesPerKwh = 1000`). Load ↔ pulse-interval and load ↔ 5-minute pulse-count conversion formulas are in [firmware/fw_specification.md](firmware/fw_specification.md) (Hardware assumptions → Meter constant).
 
 ---
 
@@ -63,11 +66,11 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | ID | Requirement |
 | --- | --- |
 | U-1 | **Short press:** Trigger upload of pending data (and a heartbeat even when there is nothing to send). |
-| U-2 | **Long press:** Toggle “stay awake / diagnostics” without uploading. |
+| U-2 | **Long press:** Toggle “stay awake / diagnostics” without uploading. Newly **enabled** → remain/enter stay-awake; newly **disabled** → return to normal sleeping operation. |
 | U-3 | Stay-awake mode keeps the device awake for inspection, live pulse indication, and operator commands over a serial console. |
-| U-4 | The operator must be able to exit stay-awake and return the device to normal sleeping operation. |
+| U-4 | The operator must be able to exit stay-awake and return the device to normal sleeping operation (long-press toggle off, or diagnostics serial command). |
 | U-5 | With a debug host connected over USB serial, the device may remain awake for development without requiring the stay-awake flag. |
-| U-6 | Visible indicators must distinguish at least: idle awake, pulse seen, housekeeping, upload in progress, upload failure, stay-awake enabled, stay-awake disabled. |
+| U-6 | Visible indicators must distinguish at least: idle awake, pulse seen (~100 ms flash per accepted pulse, including during long blocking work such as upload), housekeeping, upload in progress, upload failure, stay-awake enabled, stay-awake disabled. |
 
 ---
 
@@ -76,7 +79,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | ID | Requirement |
 | --- | --- |
 | P-1 | Uploads are initiated by the user (short press), not on a continuous network schedule. |
-| P-2 | On upload, the device must close the current period if needed, connect to the network, refresh time from the network when possible, and send pending records. |
+| P-2 | On upload, the device must fold any already-accepted pulses still only in volatile awake counting into the open period, close that period if needed, connect to the network, refresh time from the network when possible, and send pending records. Pulses accepted during the upload itself belong to the new open period, not the batch being posted. |
 | P-3 | Records are sent in bounded batches; remaining records drain on later successful uploads. |
 | P-4 | A record may be discarded locally only after the backend has acknowledged it. |
 | P-5 | Network or protocol failure must retain records and give clear failure feedback. |
@@ -90,7 +93,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 
 | ID | Requirement |
 | --- | --- |
-| D-1 | Operators can inspect stored records, battery, input levels, and time while awake. |
+| D-1 | Operators can inspect stored records (raw durable-storage hex and the upload JSON body that would be POSTed), the open incomplete period (hot pulse count / period start), whether durable storage is available, unsynced record count, battery (voltage, estimate, and ADC calibration health), input levels, and time while awake. |
 | D-2 | Operators can clear stored data when deliberately requested. |
 | D-3 | Operators can force an upload and reboot from the console. |
 | D-4 | Serial logging is available for troubleshooting and may be disabled in production builds to save power. |
@@ -113,10 +116,12 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | Intent | Observable acceptance |
 | --- | --- |
 | Q-1 / W-2 | After pulse or housekeeping, device returns to sleep unless stay-awake/USB applies. |
-| Q-7 | Pulse wakes update hot counters without a LittleFS write per pulse. |
+| Q-2 / Q-7 | Pulse wakes update hot counters without a durable-storage write per pulse, and without requiring durable storage to be available; roll/upload still need durable storage. |
 | M-5 / M-6 | Isolated pulse increments by one; burst trains are fully counted then sleep after quiet. |
 | W-4 / W-5 | Documented priority when button+RTC (+pulse) coincide; no corrupt records; deferred sources handled later. |
-| U-1 / U-2 | Short press uploads; long press toggles stay-awake without upload. |
+| U-1 / U-2 | Short press uploads; long press toggles stay-awake without upload (enable → stay awake; disable → sleep). |
+| U-6 | Pulse LED ~100 ms flash per accepted pulse even during upload; status LED patterns for upload, housekeeping, stay-awake, and failure. |
+| D-1 | Diagnostics `status` / `dump` expose storage health, open hot period, and rolled-only JSON readings. |
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |
 | P-8 / N-4 | After successful upload with readings, OTA check may run; USB flash remains a valid install path. |
