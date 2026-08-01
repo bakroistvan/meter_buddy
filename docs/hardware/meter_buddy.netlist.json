@@ -1,0 +1,182 @@
+{
+  "U1": {
+    "props": {
+      "Designator": "U1",
+      "DeviceName": "XIAO-ESP32C3",
+      "Value": "Seeed XIAO ESP32-C3"
+    },
+    "pins": {
+      "1": "VBAT_SENSE",
+      "2": "BTN_UPLOAD",
+      "3": "PULSE",
+      "4": "RTC_INT",
+      "5": "SDA",
+      "6": "SCL",
+      "9": "LED_PULSE",
+      "11": "LED_STATUS",
+      "12": "V3V3",
+      "13": "GND",
+      "15": "VBAT"
+    }
+  },
+  "U2": {
+    "props": {
+      "Designator": "U2",
+      "DeviceName": "DS3231",
+      "Value": "DS3231+AT24C32"
+    },
+    "pins": {
+      "1": "V3V3",
+      "2": "GND",
+      "3": "SDA",
+      "4": "SCL",
+      "5": "RTC_INT"
+    }
+  },
+  "U3": {
+    "props": {
+      "Designator": "U3",
+      "DeviceName": "TEMT6000",
+      "Value": "TEMT6000"
+    },
+    "pins": {
+      "1": "V3V3",
+      "2": "GND",
+      "3": "PULSE"
+    }
+  },
+  "U4": {
+    "props": {
+      "Designator": "U4",
+      "DeviceName": "TP4056",
+      "Value": "TP4056"
+    },
+    "pins": {
+      "1": "USB5V",
+      "2": "GND",
+      "3": "VBAT",
+      "4": "GND"
+    }
+  },
+  "BT1": {
+    "props": {
+      "Designator": "BT1",
+      "DeviceName": "Battery",
+      "Value": "LiPo 3.7V"
+    },
+    "pins": {
+      "1": "VBAT",
+      "2": "GND"
+    }
+  },
+  "SW1": {
+    "props": {
+      "Designator": "SW1",
+      "DeviceName": "SW_PUSH",
+      "Value": "Upload"
+    },
+    "pins": {
+      "1": "BTN_UPLOAD",
+      "2": "GND"
+    }
+  },
+  "R1": {
+    "props": {
+      "Designator": "R1",
+      "DeviceName": "R",
+      "Value": "200k"
+    },
+    "pins": {
+      "1": "VBAT",
+      "2": "VBAT_SENSE"
+    }
+  },
+  "R2": {
+    "props": {
+      "Designator": "R2",
+      "DeviceName": "R",
+      "Value": "200k"
+    },
+    "pins": {
+      "1": "VBAT_SENSE",
+      "2": "GND"
+    }
+  },
+  "R3": {
+    "props": {
+      "Designator": "R3",
+      "DeviceName": "R",
+      "Value": "330"
+    },
+    "pins": {
+      "1": "LED_PULSE",
+      "2": "LED_PULSE_A"
+    }
+  },
+  "R4": {
+    "props": {
+      "Designator": "R4",
+      "DeviceName": "R",
+      "Value": "330"
+    },
+    "pins": {
+      "1": "LED_STATUS",
+      "2": "LED_STATUS_A"
+    }
+  },
+  "R5": {
+    "props": {
+      "Designator": "R5",
+      "DeviceName": "R",
+      "Value": "4.7k"
+    },
+    "pins": {
+      "1": "V3V3",
+      "2": "SDA"
+    }
+  },
+  "R6": {
+    "props": {
+      "Designator": "R6",
+      "DeviceName": "R",
+      "Value": "4.7k"
+    },
+    "pins": {
+      "1": "V3V3",
+      "2": "SCL"
+    }
+  },
+  "R7": {
+    "props": {
+      "Designator": "R7",
+      "DeviceName": "R",
+      "Value": "3k"
+    },
+    "pins": {
+      "1": "U4_RPROG_A",
+      "2": "U4_RPROG_B"
+    }
+  },
+  "D1": {
+    "props": {
+      "Designator": "D1",
+      "DeviceName": "LED",
+      "Value": "Pulse"
+    },
+    "pins": {
+      "1": "LED_PULSE_A",
+      "2": "GND"
+    }
+  },
+  "D2": {
+    "props": {
+      "Designator": "D2",
+      "DeviceName": "LED",
+      "Value": "Status"
+    },
+    "pins": {
+      "1": "LED_STATUS_A",
+      "2": "GND"
+    }
+  }
+}

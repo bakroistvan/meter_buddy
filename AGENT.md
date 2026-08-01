@@ -16,6 +16,7 @@ Index and archive map: [docs/README.md](docs/README.md).
 | Doc | Role |
 | --- | --- |
 | [docs/api/upload.md](docs/api/upload.md) | Firmware ↔ backend upload JSON contract |
+| [docs/hardware/schematic.md](docs/hardware/schematic.md) | Module schematic / nets (matches fw pin map) |
 | [README.md](README.md) | Build/flash, pin overview, hardware |
 | [backend/README.md](backend/README.md) | FastAPI server, Docker, tests |
 

@@ -163,7 +163,7 @@ python -m pytest -q backend
 
 ## Hardware wiring
 
-Normative pin map and hardware assumptions: [docs/firmware/fw_specification.md](docs/firmware/fw_specification.md) (Hardware assumptions). Historical wiring notes: [docs/archive/wiring.md](docs/archive/wiring.md).
+Normative pin map and hardware assumptions: [docs/firmware/fw_specification.md](docs/firmware/fw_specification.md) (Hardware assumptions). Module schematic + EasyEDA netlist: [docs/hardware/schematic.md](docs/hardware/schematic.md). Historical wiring notes: [docs/archive/wiring.md](docs/archive/wiring.md).
 
 ## Current Firmware Notes
 
