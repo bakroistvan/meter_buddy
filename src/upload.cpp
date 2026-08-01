@@ -53,18 +53,37 @@ void appendJsonEscaped(String &out, const char *text) {
   }
 }
 
-String buildBody(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
+void logEvent(const char *message) {
+  if (config::EnableSerialLogs) {
+    Serial.println(message);
+  }
+}
+
+bool disconnectWifiIfAllowed() {
+  if (config::KeepWifiConnectedWhenAwake) {
+    return true;
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  return true;
+}
+
+} // namespace
+
+String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   String body;
-  body.reserve(512 + batch.count * 120 + batch.errorCount * 80);
+  body.reserve(512 + batch.count * 100 + batch.errorCount * 80);
   body += "{\"device_id\":\"";
   body += config::DeviceId;
   body += "\",\"meter_impulses_per_kwh\":";
   body += config::MeterImpulsesPerKwh;
   body += ",\"upload_trigger\":\"button\"";
-  body += ",\"battery_v\":";
-  body += String(batteryReading.volts, 2);
-  body += ",\"battery_pct_est\":";
-  body += String(batteryReading.percent);
+  if (batteryReading != nullptr) {
+    body += ",\"battery_v\":";
+    body += String(batteryReading->volts, 3);
+    body += ",\"battery_pct_est\":";
+    body += String(batteryReading->percent);
+  }
   body += ",\"readings\":[";
 
   for (uint8_t i = 0; i < batch.count; ++i) {
@@ -73,18 +92,12 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading &batt
       body += ',';
     }
     const uint32_t periodEnd = record.periodStart + config::RtcWakeIntervalSeconds;
-    const float volts = record.batteryMv / 1000.0f;
-    const uint8_t pct = battery::estimatePercent(volts);
     body += "{\"timestamp\":\"";
     body += iso8601(periodEnd);
     body += "\",\"period_start\":\"";
     body += iso8601(record.periodStart);
     body += "\",\"pulses\":";
     body += String(record.pulses);
-    body += ",\"battery_v\":";
-    body += String(volts, 2);
-    body += ",\"battery_pct_est\":";
-    body += String(pct);
     body += "}";
   }
 
@@ -109,23 +122,6 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading &batt
   body += "]}";
   return body;
 }
-
-void logEvent(const char *message) {
-  if (config::EnableSerialLogs) {
-    Serial.println(message);
-  }
-}
-
-bool disconnectWifiIfAllowed() {
-  if (config::KeepWifiConnectedWhenAwake) {
-    return true;
-  }
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  return true;
-}
-
-} // namespace
 
 bool ensureWifiConnected() {
   if (WiFi.status() == WL_CONNECTED) {
@@ -167,7 +163,7 @@ bool syncRtcFromNetwork() {
   return false;
 }
 
-Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &batteryReading) {
+Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   if (!ensureWifiConnected()) {
     disconnectWifiIfAllowed();
     return Result::WifiFailed;

@@ -14,7 +14,9 @@ enum class Result {
 
 bool ensureWifiConnected();
 bool syncRtcFromNetwork();
-Result sendBatch(const storage::UploadBatch &batch, const battery::Reading &battery);
+// batteryReading may be nullptr to omit top-level battery_v / battery_pct_est.
+String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading);
+Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batteryReading);
 const char *resultName(Result result);
 void checkFirmwareUpdate();
 
