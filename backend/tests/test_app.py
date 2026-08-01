@@ -244,3 +244,47 @@ def test_empty_readings_with_errors_and_battery(tmp_path, monkeypatch):
         )
         assert rejected.status_code == 422
 
+
+def test_upload_omits_battery_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    with TestClient(app.main.app) as client:
+        payload = {
+            "device_id": "meter-buddy-001",
+            "meter_impulses_per_kwh": 1000,
+            "upload_trigger": "button",
+            "readings": [
+                {
+                    "timestamp": "2026-05-01T13:00:00Z",
+                    "period_start": "2026-05-01T12:00:00Z",
+                    "pulses": 42,
+                }
+            ],
+        }
+
+        response = client.post(
+            "/api/meter-buddy/upload",
+            headers=auth_header(),
+            json=payload,
+        )
+        assert response.status_code == 201
+        assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 1}
+
+        dump = client.get("/dumps/1.json")
+        assert dump.status_code == 200
+        body = dump.json()
+        assert "battery_v" not in body
+        assert "battery_pct_est" not in body
+        assert "battery_v" not in body["readings"][0]
+        assert "battery_pct_est" not in body["readings"][0]
+
+        dumps = client.get("/dumps").json()
+        assert dumps[0]["battery_v"] is None
+        assert dumps[0]["battery_pct_est"] is None
+

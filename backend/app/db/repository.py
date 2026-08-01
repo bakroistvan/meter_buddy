@@ -81,7 +81,9 @@ def init_db() -> None:
 
 def store_upload(payload: UploadPayload) -> tuple[int, int]:
     received_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    raw_json = json.dumps(payload.model_dump(mode="json"), separators=(",", ":"))
+    raw_json = json.dumps(
+        payload.model_dump(mode="json", exclude_none=True), separators=(",", ":")
+    )
 
     with connection() as conn:
         cursor = conn.execute(
@@ -149,8 +151,8 @@ def list_dumps() -> list[sqlite3.Row]:
                   d.meter_impulses_per_kwh,
                   d.upload_trigger,
                   d.reading_count,
-                  (SELECT r.battery_v FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_v,
-                  (SELECT r.battery_pct_est FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_pct_est
+                  json_extract(d.raw_json, '$.battery_v') AS battery_v,
+                  json_extract(d.raw_json, '$.battery_pct_est') AS battery_pct_est
                 FROM upload_dumps d
                 ORDER BY d.received_at DESC, d.id DESC
                 """
@@ -169,8 +171,8 @@ def get_dump_meta(dump_id: int) -> dict | None:
               d.meter_impulses_per_kwh,
               d.upload_trigger,
               d.reading_count,
-              (SELECT r.battery_v FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_v,
-              (SELECT r.battery_pct_est FROM meter_readings r WHERE r.dump_id = d.id ORDER BY r.id DESC LIMIT 1) AS battery_pct_est
+              json_extract(d.raw_json, '$.battery_v') AS battery_v,
+              json_extract(d.raw_json, '$.battery_pct_est') AS battery_pct_est
             FROM upload_dumps d WHERE d.id = ?
             """,
             (dump_id,),
