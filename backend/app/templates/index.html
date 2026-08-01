@@ -7,14 +7,16 @@
     <style>
       body {
         font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        margin: 2rem;
+        margin: 1rem 1.25rem 2rem;
         color: #1f2933;
         background: #f7f9fb;
       }
 
       main {
-        max-width: 960px;
-        margin: 0 auto;
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        box-sizing: border-box;
       }
 
       h1 {
@@ -142,11 +144,151 @@
       }
 
 
-      .plot-panel {
+      .plot-workspace {
+        display: flex;
+        gap: 1rem;
+        align-items: stretch;
         margin: 1.5rem 0;
+      }
+
+      .plot-panel {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin: 0;
         padding: 1rem;
         background: white;
         border: 1px solid #d9e2ec;
+      }
+
+      .lifetime-panel {
+        flex: 0 0 340px;
+        width: 340px;
+        margin: 0;
+        padding: 1rem;
+        background: white;
+        border: 1px solid #d9e2ec;
+        box-sizing: border-box;
+      }
+
+      .lifetime-panel h2 {
+        font-size: 1.1rem;
+        margin: 0 0 0.75rem;
+      }
+
+      .lifetime-panel p.hint {
+        margin: 0 0 1rem;
+        font-size: 0.8rem;
+        color: #62748a;
+        line-height: 1.35;
+      }
+
+      .lifetime-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 0.7rem;
+      }
+
+      .lifetime-controls label {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.85rem;
+      }
+
+      .lifetime-controls input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.45rem;
+        border: 1px solid #bcccdc;
+        border-radius: 4px;
+      }
+
+      .lifetime-controls input[type="checkbox"] {
+        width: auto;
+        margin: 0;
+        padding: 0;
+        border: none;
+      }
+
+      .lifetime-controls .check-row {
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .lifetime-controls .check-row span {
+        font-size: 0.85rem;
+      }
+
+      .lifetime-results .section-title {
+        margin: 0.85rem 0 0.35rem;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: #475569;
+      }
+
+      .lifetime-results .section-title:first-child {
+        margin-top: 0;
+      }
+
+      .lifetime-results {
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        line-height: 1.45;
+      }
+
+      .lifetime-results .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin: 0.2rem 0;
+      }
+
+      .lifetime-results .row span:first-child {
+        color: #62748a;
+      }
+
+      .lifetime-results .row strong {
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+
+      .lifetime-results .highlight {
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid #e2e8f0;
+      }
+
+      .lifetime-results .highlight strong {
+        color: #0f766e;
+        font-size: 1.05rem;
+      }
+
+      .lifetime-results .warn {
+        margin-top: 0.75rem;
+        color: #b45309;
+        font-size: 0.8rem;
+      }
+
+      .lifetime-results .error {
+        color: #b83232;
+      }
+
+      @media (max-width: 960px) {
+        .plot-workspace {
+          flex-direction: column;
+        }
+
+        .lifetime-panel {
+          flex: 1 1 auto;
+          width: 100%;
+        }
       }
 
       .plot-controls {
@@ -258,23 +400,59 @@
     <main>
       <h1>Meter Buddy Dumps</h1>
 
-      <section class="plot-panel">
-        <h2>Plot uploads</h2>
-        <div class="plot-controls">
-          <label>From upload ID <input id="plot-start-id" type="number" min="1"></label>
-          <label>To upload ID <input id="plot-end-id" type="number" min="1"></label>
-          <button id="plot-button" type="button">Plot range</button>
-        </div>
-        <p id="plot-status" role="status"></p>
-        <div id="plot-telemetry" class="plot-telemetry" style="display: none;">
-          <div class="telemetry-item item-time"><span class="label">TIME:</span> <span id="telemetry-time" class="val">-</span></div>
-          <div class="telemetry-item item-pulses"><span class="label">PULSES:</span> <span id="telemetry-pulses" class="val">-</span></div>
-          <div class="telemetry-item item-power"><span class="label">EST POWER:</span> <span id="telemetry-power" class="val">-</span></div>
-          <div class="telemetry-item item-kwh"><span class="label">CUMULATIVE:</span> <span id="telemetry-kwh" class="val">-</span></div>
-          <div class="telemetry-item item-batt"><span class="label">BATTERY:</span> <span id="telemetry-batt" class="val">-</span></div>
-        </div>
-        <canvas id="readings-plot" aria-label="Meter readings plot"></canvas>
-      </section>
+      <div class="plot-workspace">
+        <section class="plot-panel">
+          <h2>Plot uploads</h2>
+          <div class="plot-controls">
+            <label>From upload ID <input id="plot-start-id" type="number" min="1"></label>
+            <label>To upload ID <input id="plot-end-id" type="number" min="1"></label>
+            <button id="plot-button" type="button">Plot range</button>
+          </div>
+          <p id="plot-status" role="status"></p>
+          <div id="plot-telemetry" class="plot-telemetry" style="display: none;">
+            <div class="telemetry-item item-time"><span class="label">TIME:</span> <span id="telemetry-time" class="val">-</span></div>
+            <div class="telemetry-item item-pulses"><span class="label">PULSES:</span> <span id="telemetry-pulses" class="val">-</span></div>
+            <div class="telemetry-item item-power"><span class="label">EST POWER:</span> <span id="telemetry-power" class="val">-</span></div>
+            <div class="telemetry-item item-kwh"><span class="label">CUMULATIVE:</span> <span id="telemetry-kwh" class="val">-</span></div>
+            <div class="telemetry-item item-batt"><span class="label">BATTERY:</span> <span id="telemetry-batt" class="val">-</span></div>
+          </div>
+          <canvas id="readings-plot" aria-label="Meter readings plot"></canvas>
+        </section>
+
+        <aside class="lifetime-panel" aria-label="Battery lifetime calculator">
+          <h2>Battery lifetime</h2>
+          <p class="hint">
+            Uses the plotted battery curve and attributes drain to pulses only
+            (not wall-clock). Debug RTC periods and simulated load do not need
+            to match production 5‑minute rolls or monthly kWh.
+          </p>
+          <div class="lifetime-controls">
+            <label>
+              Avg monthly consumption (kWh)
+              <input id="lifetime-monthly-kwh" type="number" min="0.001" step="1" value="300">
+            </label>
+            <label>
+              Impulses / kWh
+              <input id="lifetime-impulses" type="number" min="1" step="1" value="1000">
+            </label>
+            <label>
+              Combined LED current (mA)
+              <input id="lifetime-led-ma" type="number" min="0.01" step="0.1" value="10">
+            </label>
+            <label>
+              Battery capacity (mAh)
+              <input id="lifetime-batt-mah" type="number" min="1" step="1" value="650">
+            </label>
+            <label class="check-row">
+              <input id="lifetime-led-correct" type="checkbox" checked>
+              <span>Data gathered with 2 always-on red LEDs on 3V3 (correct for removal)</span>
+            </label>
+          </div>
+          <div id="lifetime-results" class="lifetime-results">
+            <p class="error">Plot a range with battery samples to estimate lifetime.</p>
+          </div>
+        </aside>
+      </div>
 
       <section class="cleanup-panel">
         <h2>Delete old uploads</h2>
@@ -307,7 +485,7 @@
       function batteryCell(dump) {
         var html = "";
         if (dump.battery_v != null) {
-          html += dump.battery_v.toFixed(2) + " V";
+          html += dump.battery_v.toFixed(3) + " V";
         } else {
           html += "n/a";
         }
@@ -496,8 +674,172 @@
       }
 
 
+      function estimatePercentFromVolts(volts) {
+        if (volts == null || !Number.isFinite(volts)) return null;
+        if (volts >= 4.2) return 100;
+        if (volts <= 3.3) return 0;
+        return (volts - 3.3) * 100 / (4.2 - 3.3);
+      }
+
+      function readingBatteryPct(r) {
+        if (r.battery_pct_est != null && Number.isFinite(r.battery_pct_est)) {
+          return Number(r.battery_pct_est);
+        }
+        return estimatePercentFromVolts(r.battery_v);
+      }
+
+      function formatDurationMonths(months) {
+        if (!Number.isFinite(months) || months < 0) return "n/a";
+        if (months >= 24) return (months / 12).toFixed(1) + " years";
+        if (months >= 1) return months.toFixed(1) + " months";
+        var days = months * 30.437;
+        if (days >= 1) return days.toFixed(1) + " days";
+        return (days * 24).toFixed(1) + " hours";
+      }
+
+      function lifetimeEstimateBlock(title, monthsFromFull, monthsFromNow, endPct, extraRows) {
+        var html = "<div class=\"section-title\">" + title + "</div>";
+        if (extraRows) html += extraRows;
+        html += "<div class=\"highlight\">";
+        html += "<div class=\"row\"><span>Est. life from 100%</span><strong>" + formatDurationMonths(monthsFromFull) + "</strong></div>";
+        html += "<div class=\"row\"><span>Est. remaining @ " + endPct.toFixed(0) + "%</span><strong>" + formatDurationMonths(monthsFromNow) + "</strong></div>";
+        html += "</div>";
+        return html;
+      }
+
+      function updateLifetimeCalculator(readings) {
+        var results = document.getElementById("lifetime-results");
+        var monthlyKwh = Number(document.getElementById("lifetime-monthly-kwh").value);
+        var impulsesInput = document.getElementById("lifetime-impulses");
+        var impulsesPerKwh = Number(impulsesInput.value);
+        var correctLeds = document.getElementById("lifetime-led-correct").checked;
+        var ledMa = Number(document.getElementById("lifetime-led-ma").value);
+        var battMah = Number(document.getElementById("lifetime-batt-mah").value);
+
+        if (!readings || !readings.length) {
+          results.innerHTML = "<p class=\"error\">Plot a range with battery samples to estimate lifetime.</p>";
+          return;
+        }
+
+        if (!impulsesInput.dataset.userEdited) {
+          impulsesPerKwh = Number(readings[0].impulsesPerKwh) || 1000;
+          impulsesInput.value = String(impulsesPerKwh);
+        }
+
+        if (!Number.isFinite(monthlyKwh) || monthlyKwh <= 0 || !Number.isFinite(impulsesPerKwh) || impulsesPerKwh <= 0) {
+          results.innerHTML = "<p class=\"error\">Enter positive monthly kWh and impulses / kWh.</p>";
+          return;
+        }
+
+        var withBatt = readings.filter(function (r) { return readingBatteryPct(r) != null; });
+        if (withBatt.length < 2) {
+          results.innerHTML = "<p class=\"error\">Need at least two battery samples in the plotted range.</p>";
+          return;
+        }
+
+        var startPct = readingBatteryPct(withBatt[0]);
+        var endPct = readingBatteryPct(withBatt[withBatt.length - 1]);
+        var deltaPct = startPct - endPct;
+        var totalPulses = readings.reduce(function (sum, r) { return sum + r.pulses; }, 0);
+        var observedKwh = readings.reduce(function (sum, r) {
+          return sum + r.pulses / r.impulsesPerKwh;
+        }, 0);
+        var spanMs = withBatt[withBatt.length - 1].time - withBatt[0].time;
+        var spanHours = spanMs / 3600000;
+        var pulsesPerMonth = monthlyKwh * impulsesPerKwh;
+        var hoursPerMonth = 30.437 * 24;
+
+        var html = "";
+        html += "<div class=\"row\"><span>Observed pulses</span><strong>" + totalPulses.toLocaleString() + "</strong></div>";
+        html += "<div class=\"row\"><span>Observed energy</span><strong>" + observedKwh.toFixed(3) + " kWh</strong></div>";
+        html += "<div class=\"row\"><span>Battery start → end</span><strong>" + startPct.toFixed(1) + "% → " + endPct.toFixed(1) + "%</strong></div>";
+        html += "<div class=\"row\"><span>Δ capacity (raw)</span><strong>" + deltaPct.toFixed(2) + " %</strong></div>";
+        html += "<div class=\"row\"><span>Sample span</span><strong>" + (spanHours < 48 ? spanHours.toFixed(2) + " h" : (spanHours / 24).toFixed(1) + " d") + "</strong></div>";
+        html += "<div class=\"row\"><span>Pulses / month @ input</span><strong>" + Math.round(pulsesPerMonth).toLocaleString() + "</strong></div>";
+
+        if (!Number.isFinite(ledMa) || ledMa <= 0 || !Number.isFinite(battMah) || battMah <= 0) {
+          html += "<p class=\"error\">Enter positive LED current (mA) and battery capacity (mAh).</p>";
+          results.innerHTML = html;
+          return;
+        }
+
+        if (!(spanHours > 0)) {
+          html += "<p class=\"warn\">Sample span is zero — cannot compute average discharge.</p>";
+          results.innerHTML = html;
+          return;
+        }
+
+        // I_avg = (Δ% / 100) * capacity_mAh / span_hours
+        var avgDischargeMa = (deltaPct / 100) * battMah / spanHours;
+        var ledPctOverSpan = (ledMa * spanHours / battMah) * 100;
+        var monthlyLedPct = (ledMa * hoursPerMonth / battMah) * 100;
+        var deviceDeltaPct = correctLeds ? (deltaPct - ledPctOverSpan) : deltaPct;
+        var deviceAvgMa = (deviceDeltaPct / 100) * battMah / spanHours;
+
+        html += "<div class=\"row\"><span>Avg discharge (raw)</span><strong>" + avgDischargeMa.toFixed(2) + " mA</strong></div>";
+        if (correctLeds) {
+          html += "<div class=\"row\"><span>LED Δ over span</span><strong>" + ledPctOverSpan.toFixed(2) + " %</strong></div>";
+          html += "<div class=\"row\"><span>Avg discharge (LEDs stripped)</span><strong>" + deviceAvgMa.toFixed(2) + " mA</strong></div>";
+          html += "<div class=\"row\"><span>Device Δ (LEDs stripped)</span><strong>" + deviceDeltaPct.toFixed(2) + " %</strong></div>";
+        } else {
+          html += "<div class=\"row\"><span>Avg discharge (device)</span><strong>" + deviceAvgMa.toFixed(2) + " mA</strong></div>";
+          html += "<div class=\"row\"><span>Device Δ (as measured)</span><strong>" + deviceDeltaPct.toFixed(2) + " %</strong></div>";
+        }
+        html += "<div class=\"row\"><span>LED drain / month</span><strong>" + monthlyLedPct.toFixed(2) + " %/mo</strong></div>";
+
+        if (totalPulses <= 0) {
+          html += "<p class=\"warn\">No pulses in range — cannot attribute drain to pulse activity.</p>";
+          results.innerHTML = html;
+          return;
+        }
+
+        if (deltaPct <= 0) {
+          html += "<p class=\"warn\">Battery did not drop over this range (charging or flat). Lifetime cannot be estimated from drain-per-pulse.</p>";
+          results.innerHTML = html;
+          return;
+        }
+
+        if (deviceDeltaPct <= 0) {
+          html += "<p class=\"warn\">Observed drop is fully explained by the assumed LED current (or less). Pulse-related drain cannot be separated — check LED mA / checkbox, or use a longer discharge without charging.</p>";
+          html += lifetimeEstimateBlock(
+            "With LED drainage (LEDs only)",
+            100 / monthlyLedPct,
+            endPct / monthlyLedPct,
+            endPct,
+            "<div class=\"row\"><span>Note</span><strong>no pulse term</strong></div>"
+          );
+          html += "<div class=\"section-title\">Without LED drainage</div><p class=\"warn\" style=\"margin:0.35rem 0 0\">Cannot estimate — device Δ ≤ 0.</p>";
+          results.innerHTML = html;
+          return;
+        }
+
+        var pctPerPulseDevice = deviceDeltaPct / totalPulses;
+        var monthlyPulsePct = pctPerPulseDevice * pulsesPerMonth;
+        var monthlyWithLeds = monthlyPulsePct + monthlyLedPct;
+
+        html += "<div class=\"row\"><span>Device drain / pulse</span><strong>" + pctPerPulseDevice.toExponential(3) + " %/pulse</strong></div>";
+
+        html += lifetimeEstimateBlock(
+          "With LED drainage",
+          100 / monthlyWithLeds,
+          endPct / monthlyWithLeds,
+          endPct,
+          "<div class=\"row\"><span>Pulse + LED / month</span><strong>" + monthlyWithLeds.toFixed(3) + " %/mo</strong></div>"
+        );
+        html += lifetimeEstimateBlock(
+          "Without LED drainage",
+          100 / monthlyPulsePct,
+          endPct / monthlyPulsePct,
+          endPct,
+          "<div class=\"row\"><span>Pulse-only / month</span><strong>" + monthlyPulsePct.toFixed(3) + " %/mo</strong></div>"
+        );
+        html += "<p class=\"hint\" style=\"margin:0.75rem 0 0\">Avg mA = (Δ% / 100) × capacity_mAh / span_hours. Checkbox only describes how the sample was taken; both lifetime estimates use the same pulse drain, with-LED adds continuous LED current.</p>";
+        results.innerHTML = html;
+      }
+
       function plotReadings(readings, hoveredTime) {
         window.lastPlotReadings = readings;
+        if (hoveredTime == null) updateLifetimeCalculator(readings);
         var canvas = document.getElementById("readings-plot");
         var telemetryEl = document.getElementById("plot-telemetry");
         var width = canvas.clientWidth || 900;
@@ -574,8 +916,9 @@
           ctx.stroke();
 
           var dateObj = new Date(tickTime);
-          var timeStr = dateObj.toISOString().slice(11, 19);
-          var dateStr = dateObj.toISOString().slice(5, 10);
+          var pad = function (n) { return String(n).padStart(2, "0"); };
+          var timeStr = pad(dateObj.getHours()) + ":" + pad(dateObj.getMinutes()) + ":" + pad(dateObj.getSeconds());
+          var dateStr = pad(dateObj.getMonth() + 1) + "-" + pad(dateObj.getDate());
           ctx.fillText(timeStr, px, height - bottom + 18);
           ctx.fillText(dateStr, px, height - bottom + 30);
         }
@@ -708,7 +1051,7 @@
 
           var top2 = nextTop();
           panelTops.push({ top: top2, min: vMinBound, max: vMaxBound, fn: function (r) { return r.battery_v; }, color: "#ea580c" });
-          drawPanel(top2, vMinBound, vMaxBound, "BATTERY VOLTAGE", "V", "#ea580c", withV, function (r) { return r.battery_v; }, function (v) { return v.toFixed(2); });
+          drawPanel(top2, vMinBound, vMaxBound, "BATTERY VOLTAGE", "V", "#ea580c", withV, function (r) { return r.battery_v; }, function (v) { return v.toFixed(3); });
         }
 
         // 4. Battery Capacity Panel
@@ -734,11 +1077,11 @@
 
         if (closest) {
           telemetryEl.style.display = "flex";
-          document.getElementById("telemetry-time").textContent = new Date(closest.time).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+          document.getElementById("telemetry-time").textContent = formatReceivedAt(closest.time);
           document.getElementById("telemetry-pulses").textContent = closest.pulses + " cnt";
           document.getElementById("telemetry-power").textContent = Number.isFinite(closest.powerW) ? closest.powerW.toFixed(1) + " W" : "n/a";
           document.getElementById("telemetry-kwh").textContent = closest.cumulativeKwh.toFixed(3) + " kWh";
-          document.getElementById("telemetry-batt").textContent = closest.battery_v != null ? closest.battery_v.toFixed(2) + " V" + (closest.battery_pct_est != null ? " (" + closest.battery_pct_est + "%)" : "") : "n/a";
+          document.getElementById("telemetry-batt").textContent = closest.battery_v != null ? closest.battery_v.toFixed(3) + " V" + (closest.battery_pct_est != null ? " (" + closest.battery_pct_est + "%)" : "") : "n/a";
 
           var cx = x(closest.time);
 
@@ -847,6 +1190,22 @@
 
       document.getElementById("plot-button").addEventListener("click", plotUploadRange);
       document.getElementById("delete-bulk-button").addEventListener("click", deleteUploadRange);
+      document.getElementById("lifetime-monthly-kwh").addEventListener("input", function () {
+        if (window.lastPlotReadings) updateLifetimeCalculator(window.lastPlotReadings);
+      });
+      document.getElementById("lifetime-impulses").addEventListener("input", function () {
+        this.dataset.userEdited = "1";
+        if (window.lastPlotReadings) updateLifetimeCalculator(window.lastPlotReadings);
+      });
+      document.getElementById("lifetime-led-correct").addEventListener("change", function () {
+        if (window.lastPlotReadings) updateLifetimeCalculator(window.lastPlotReadings);
+      });
+      document.getElementById("lifetime-led-ma").addEventListener("input", function () {
+        if (window.lastPlotReadings) updateLifetimeCalculator(window.lastPlotReadings);
+      });
+      document.getElementById("lifetime-batt-mah").addEventListener("input", function () {
+        if (window.lastPlotReadings) updateLifetimeCalculator(window.lastPlotReadings);
+      });
       window.addEventListener("resize", function () {
         if (window.lastPlotReadings) plotReadings(window.lastPlotReadings);
       });
