@@ -234,14 +234,24 @@ bool begin() {
   return true;
 }
 
+bool available() {
+  return initialized;
+}
+
+uint16_t currentPulses() {
+  return rtcCurrentPulses;
+}
+
+uint32_t currentPeriodStart() {
+  return rtcCurrentPeriodStart;
+}
+
 bool incrementCurrentPulse(uint32_t timestamp) {
   return addPulses(timestamp, 1);
 }
 
 bool addPulses(uint32_t timestamp, uint32_t count) {
-  if (!initialized) {
-    return false;
-  }
+  // Hot counters live in RTC RAM and must update even if LittleFS mount failed.
   if (count == 0) return true;
   if (rtcCurrentPeriodStart == 0) {
     rtcCurrentPeriodStart = timestamp;
@@ -375,7 +385,7 @@ bool setStayAwakeBoot(bool enabled) {
   return saveStayAwakeState();
 }
 
-void dump(Stream &stream) {
+void hexdump(Stream &stream) {
   if (!initialized) {
     stream.println("storage unavailable");
     return;

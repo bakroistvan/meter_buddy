@@ -31,6 +31,9 @@ struct UploadBatch {
 };
 
 bool begin();
+bool available();
+uint16_t currentPulses();
+uint32_t currentPeriodStart();
 bool incrementCurrentPulse(uint32_t timestamp);
 bool addPulses(uint32_t timestamp, uint32_t count);
 bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv);
@@ -39,7 +42,7 @@ bool markSyncedThrough(uint32_t sequence);
 uint32_t unsyncedCount();
 bool stayAwakeBoot();
 bool setStayAwakeBoot(bool enabled);
-void dump(Stream &stream);
+void hexdump(Stream &stream);
 void clear();
 
 } // namespace storage
