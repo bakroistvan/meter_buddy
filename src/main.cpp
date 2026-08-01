@@ -3,6 +3,8 @@
 #include <esp_sleep.h>
 #include <esp_ota_ops.h>
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/timers.h>
 
 #include "battery.h"
 #include "config.h"
@@ -32,13 +34,13 @@ RTC_DATA_ATTR uint32_t lastAcceptedPulseWakeUnix = 0;
 volatile uint32_t awakePulseCount = 0;
 volatile uint32_t lastPulseRiseMs = 0;
 volatile bool pulseDetected = false;
-volatile uint32_t pulseLedOffAtMs = 0;
 uint32_t lastAwakePulseFlushMs = 0;
 uint32_t lastWifiCheckMs = 0;
 bool awakePulseInterruptAttached = false;
 bool rtcClockAvailable = false;
 bool storageAvailable = false;
 bool serialStarted = false;
+TimerHandle_t pulseLedOffTimer = nullptr;
 
 AwakeLed awakeLed;
 
@@ -48,9 +50,33 @@ void logLine(const char *message) {
   }
 }
 
+void pulseLedOffTimerCallback(TimerHandle_t) {
+  digitalWrite(pins::PulseLedPin, LOW);
+}
+
+void initPulseLedOffTimer() {
+  if (pulseLedOffTimer != nullptr) {
+    return;
+  }
+  // One-shot: ISR turns the LED on and resets this 100 ms off deadline so the
+  // flash completes even when loop()/upload blocks.
+  pulseLedOffTimer = xTimerCreate("pulse_led_off", pdMS_TO_TICKS(100), pdFALSE, nullptr,
+                                  pulseLedOffTimerCallback);
+}
+
+void IRAM_ATTR schedulePulseLedOffFromIsr() {
+  if (pulseLedOffTimer == nullptr) {
+    return;
+  }
+  BaseType_t higherPriorityTaskWoken = pdFALSE;
+  xTimerResetFromISR(pulseLedOffTimer, &higherPriorityTaskWoken);
+  if (higherPriorityTaskWoken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+}
+
 uint32_t currentTimestamp();
 void flushAwakePulses(bool force = false);
-void servicePulseLed();
 void enterStayAwakeMode();
 void initWakePinsAndLed();
 void initSerialIfNeeded(bool withLogDelay);
@@ -112,6 +138,7 @@ void initWakePinsAndLed() {
   pinMode(pins::RtcWakePin, INPUT_PULLUP);
   pinMode(pins::PulseLedPin, OUTPUT);
   digitalWrite(pins::PulseLedPin, LOW);
+  initPulseLedOffTimer();
   awakeLed.init();
   if (config::EnableDeepSleep) {
     awakeLed.setMode(AwakeLed::Mode::WakeFromDeepSleep);
@@ -188,6 +215,9 @@ void enterDeepSleep() {
   }
 
   logEvent("entering deep sleep");
+  if (pulseLedOffTimer != nullptr) {
+    xTimerStop(pulseLedOffTimer, 0);
+  }
   digitalWrite(pins::PulseLedPin, LOW);
   pinMode(pins::PulseLedPin, INPUT_PULLDOWN);
   awakeLed.setSleep();
@@ -232,7 +262,7 @@ void IRAM_ATTR onPulseRise() {
     lastPulseRiseMs = now;
     pulseDetected = true;
     digitalWrite(pins::PulseLedPin, HIGH);
-    pulseLedOffAtMs = now + 100;
+    schedulePulseLedOffFromIsr();
   }
 }
 
@@ -283,7 +313,6 @@ uint32_t countAwakeUntilQuiet() {
   uint32_t quietSince = millis();
 
   while (true) {
-    servicePulseLed();
     const uint32_t count = awakePulseCount;
     if (count != lastCount) {
       lastCount = count;
@@ -329,15 +358,37 @@ void handleRtcWake(uint32_t timestamp) {
   // Perform full RTC initialization including alarm cleanup for RTC wakes.
   rtc_clock::begin();
 
-  const auto reading = battery::sample();
+  const auto reading = battery::sampleForRecord();
+  const uint16_t hotBefore = storage::currentPulses();
+  const bool rolled = storage::rollCurrentPeriod(
+      timestamp, static_cast<uint16_t>(reading.volts * 1000.0f));
   if (config::EnableSerialLogs) {
-    Serial.printf("rtc roll battery=%.2fV pct=%u timestamp=%lu (%s)\n",
-                  reading.volts,
-                  reading.percent,
-                  static_cast<unsigned long>(timestamp),
-                  formatUtcTimestamp(timestamp).c_str());
+    if (hotBefore == 0) {
+      Serial.printf(
+          "rtc roll hot_pulses=0 battery=%.3fV pct=%u timestamp=%lu (%s) (no append)\n",
+          reading.volts,
+          reading.percent,
+          static_cast<unsigned long>(timestamp),
+          formatUtcTimestamp(timestamp).c_str());
+    } else if (rolled) {
+      Serial.printf(
+          "rtc roll hot_pulses=%u -> appended battery=%.3fV pct=%u timestamp=%lu (%s)\n",
+          static_cast<unsigned>(hotBefore),
+          reading.volts,
+          reading.percent,
+          static_cast<unsigned long>(timestamp),
+          formatUtcTimestamp(timestamp).c_str());
+    } else {
+      Serial.printf(
+          "rtc roll hot_pulses=%u append failed storage_ok=%d battery=%.3fV pct=%u timestamp=%lu (%s)\n",
+          static_cast<unsigned>(hotBefore),
+          storage::available() ? 1 : 0,
+          reading.volts,
+          reading.percent,
+          static_cast<unsigned long>(timestamp),
+          formatUtcTimestamp(timestamp).c_str());
+    }
   }
-  storage::rollCurrentPeriod(timestamp, static_cast<uint16_t>(reading.volts * 1000.0f));
   rtc_clock::scheduleNextWakeAlarm();
 }
 
@@ -350,16 +401,20 @@ void handleUploadWake(bool force = false) {
 
   const bool pulseInterruptWasAttached = awakePulseInterruptAttached;
   attachAwakePulseInterrupt();
-  awakeLed.setOn();
+  awakeLed.startPulseBlink();
+
+  // Flush RAM awake pulses into the open period so they roll into this upload.
+  flushAwakePulses(true);
 
   logEvent("pre-roll");
-  storage::dump(Serial);
+  storage::hexdump(Serial);
+  const auto reading = battery::sampleForRecord();
   storage::rollCurrentPeriod(currentTimestamp(),
-                             static_cast<uint16_t>(battery::sample().volts * 1000.0f));
+                             static_cast<uint16_t>(reading.volts * 1000.0f));
   logEvent("post-roll");
-  storage::dump(Serial);
+  storage::hexdump(Serial);
 
-  const auto reading = battery::sample();
+  bool includeBattery = true;
   bool uploadSucceeded = true;
   bool uploadedRecords = false;
   while (true) {
@@ -371,10 +426,16 @@ void handleUploadWake(bool force = false) {
     }
 
     if (config::EnableSerialLogs) {
-      Serial.printf("upload batch records=%u errors=%u battery=%.2fV pct=%u\n",
-                    batch.count, batch.errorCount, reading.volts, reading.percent);
+      if (includeBattery) {
+        Serial.printf("upload batch records=%u errors=%u battery=%.3fV pct=%u\n",
+                      batch.count, batch.errorCount, reading.volts, reading.percent);
+      } else {
+        Serial.printf("upload batch records=%u errors=%u battery=omitted\n",
+                      batch.count, batch.errorCount);
+      }
     }
-    const auto result = upload::sendBatch(batch, reading);
+    const auto result = upload::sendBatch(batch, includeBattery ? &reading : nullptr);
+    includeBattery = false;
     if (config::EnableSerialLogs) {
       Serial.printf("upload result=%s records=%u errors=%u\n",
                     upload::resultName(result), batch.count, batch.errorCount);
@@ -408,7 +469,8 @@ void handleUploadWake(bool force = false) {
   awakeLed.setAwake();
 }
 
-void handleStayAwakeToggle() {
+// Long-press toggles stay-awake. Returns the new flag value.
+bool handleStayAwakeToggle() {
   const bool enabled = !storage::stayAwakeBoot();
   storage::setStayAwakeBoot(enabled);
   if (config::EnableSerialLogs && serialStarted) {
@@ -418,11 +480,11 @@ void handleStayAwakeToggle() {
   if (enabled) {
     awakeLed.setOn();
     awakeLed.doubleBlink();
+    awakeLed.setAwake();
   } else {
     awakeLed.rapidErrorBlink();
   }
-  // Long-press always keeps this session awake; keep the awake LED on.
-  awakeLed.setAwake();
+  return enabled;
 }
 
 // Classify upload button from deep-sleep wake. Call immediately after pins/LED —
@@ -460,7 +522,8 @@ UploadPressKind classifyUploadPressFromWake() {
   }
 }
 
-// Awake-path button handler (diagnostics / poll). Returns true after long-press toggle.
+// Awake-path button handler (diagnostics / poll).
+// Returns true when stay-awake remains active after a long-press enable.
 bool handleUploadButton(bool force = false) {
   if (force) {
     handleUploadWake(true);
@@ -493,26 +556,45 @@ bool handleUploadButton(bool force = false) {
 
     if (millis() - pressedAt >= config::UploadLongPressMs) {
       logEvent("upload button long press");
-      handleStayAwakeToggle();
+      const bool enabled = handleStayAwakeToggle();
       waitForUploadButtonRelease();
+      if (!enabled) {
+        enterDeepSleep();
+        return false;
+      }
       return true;
     }
     delay(10);
   }
 }
 
+void dumpUploadJson() {
+  Serial.printf("open hot: storage_ok=%d hot_pulses=%u hot_start=%lu\n",
+                storage::available() ? 1 : 0,
+                static_cast<unsigned>(storage::currentPulses()),
+                static_cast<unsigned long>(storage::currentPeriodStart()));
+  Serial.println("note: JSON readings are rolled LittleFS only; open hot is not included until RTC roll or upload");
+
+  storage::UploadBatch batch{};
+  if (!storage::loadUploadBatch(batch)) {
+    Serial.println("failed to load upload batch");
+    return;
+  }
+  const auto reading = battery::sample();
+  Serial.println(upload::buildBody(batch, &reading));
+}
+
 void handleDiagnosticsBoot() {
   logEvent("diagnostics boot");
-  storage::dump(Serial);
+  storage::hexdump(Serial);
   const auto reading = battery::sample();
-  Serial.printf("battery=%.2fV pct=%u\n", reading.volts, reading.percent);
+  Serial.printf("battery=%.3fV pct=%u\n", reading.volts, reading.percent);
 
-  Serial.println("Diagnostics REPL. Commands: dump, clear, status, t[ime], upload, reboot, x[sleep]");
+  Serial.println("Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], upload, reboot, x[sleep]");
   String cmd = "";
   static bool uploadWasLow = false;
   static bool rtcWasLow = false;
   while (true) {
-    servicePulseLed();
     if (pulseDetected) {
       pulseDetected = false;
       noInterrupts();
@@ -554,7 +636,9 @@ void handleDiagnosticsBoot() {
             Serial.printf("current time: %s\n",
                           formatHumanUtcTimestamp(currentTimestamp()).c_str());
           } else if (first == 'd') {
-            storage::dump(Serial);
+            dumpUploadJson();
+          } else if (first == 'h') {
+            storage::hexdump(Serial);
           } else if (first == 'c') {
             storage::clear();
             Serial.println("storage cleared");
@@ -580,10 +664,18 @@ void handleDiagnosticsBoot() {
               nextAlarmIso = String(nextAlarmBuf);
             }
 
-            Serial.printf("battery=%.2fV pct=%u wifi=%s pulse=%s count=%lu\n",
+            Serial.printf("battery=%.3fV pct=%u adc_cal=%s ok=%d wifi=%s pulse=%s count=%lu\n",
                           r.volts, r.percent,
+                          battery::calibrationSource(),
+                          battery::calibrationOk() ? 1 : 0,
                           WiFi.status() == WL_CONNECTED ? "connected" : "disconnected",
                           pulseLow ? "LOW" : "HIGH",
+                          static_cast<unsigned long>(awakePulseCount));
+            Serial.printf("storage_ok=%d unsynced=%lu hot_pulses=%u hot_start=%lu awake_count=%lu\n",
+                          storage::available() ? 1 : 0,
+                          static_cast<unsigned long>(storage::unsyncedCount()),
+                          static_cast<unsigned>(storage::currentPulses()),
+                          static_cast<unsigned long>(storage::currentPeriodStart()),
                           static_cast<unsigned long>(awakePulseCount));
             Serial.printf("inputs upload=%s pulse=%s rtc=%s pulse_led=%s awake_led=%s\n",
                           digitalRead(pins::UploadButtonPin) == LOW ? "LOW" : "HIGH",
@@ -621,13 +713,6 @@ uint32_t currentTimestamp() {
     return rtc_clock::nowUnix();
   }
   return millis() / 1000UL;
-}
-
-void servicePulseLed() {
-  if (digitalRead(pins::PulseLedPin) == HIGH &&
-      static_cast<int32_t>(millis() - pulseLedOffAtMs) >= 0) {
-    digitalWrite(pins::PulseLedPin, LOW);
-  }
 }
 
 String formatUtcTimestamp(uint32_t timestamp) {
@@ -768,13 +853,17 @@ void setup() {
       // Only need storage for /stay_awake.dat before toggle feedback.
       Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
       storageAvailable = storage::begin();
-      handleStayAwakeToggle();
+      const bool enabled = handleStayAwakeToggle();
       waitForUploadButtonRelease();
       initSerialIfNeeded(/*withLogDelay=*/true);
       battery::begin();
       rtcClockAvailable = rtc_clock::beginTimeOnly();
       logBootSummary(cause, wakeSource);
-      enterStayAwakeMode();
+      if (enabled) {
+        enterStayAwakeMode();
+      } else {
+        enterDeepSleep();
+      }
       return;
     }
 
@@ -809,7 +898,6 @@ void setup() {
 }
 
 void loop() {
-  servicePulseLed();
   if (pulseDetected) {
     pulseDetected = false;
     noInterrupts();
