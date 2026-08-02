@@ -108,6 +108,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | N-2 | Single meter, single optical sensor. |
 | N-3 | Unacknowledged committed records must be retained on-device **indefinitely until a successful upload acknowledges them**. Flash capacity is a practical limit; the device must not silently discard unacked records to free space. |
 | N-4 | **USB flashing is the primary** way to install firmware. **Network OTA is allowed** as an optional step after a successful data upload when connectivity still permits it — not forbidden. |
+| N-5 | The backend must serve device ingest and all operator UI/admin endpoints over **HTTPS** with **authenticated** access; only a dedicated unauthenticated liveness probe (e.g. `GET /healthz`) is exempt. |
 
 ---
 
@@ -125,5 +126,6 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |
 | P-8 / N-4 | After successful upload with readings, OTA check may run before the upload network session is released; USB flash remains a valid install path. |
+| N-5 | Upload ingest, dump browser UI, dump JSON, `/db`, and live WebSocket require HTTPS + credentials; `/healthz` alone is unauthenticated. |
 
 When firmware behavior and [fw_specification.md](firmware/fw_specification.md) disagree with this intent, **intent wins for product decisions**; when they disagree only on how something is implemented, **fw_specification + code** win until intent is consciously revised.

@@ -140,6 +140,12 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 | `KeepWifiConnectedWhenAwake` | false | Keep Wi‑Fi after POST / on stay-awake entry |
 | `StayAwakeBoot` | false | Compile-time default for stay-awake cache before/without flash file |
 | `EnableSerialLogs` | true | Serial logging |
+| `UploadUrl` | `https://…/api/meter-buddy/upload` | Full HTTPS upload endpoint |
+| `BasicAuthUser` / `BasicAuthPassword` | `meter-buddy` / `change-me` | Must match backend `METER_BUDDY_AUTH_*` |
+| `TlsCaCert` | `IsrgRootCerts` | Vendored ISRG Root X1 + X2 PEM (`include/certs/isrg_roots.h`); trust Let’s Encrypt server certs without pinning the rotating leaf |
+| `AllowInsecureTls` | false | When false and `TlsCaCert` non-empty, `WiFiClientSecure` verifies the server; production must leave this false |
+
+Refresh vendored roots with `script/refresh_isrg_roots.py` if ISRG CAs change (leaf renewals do not require a firmware flash).
 
 ### Hardware assumptions
 
@@ -222,17 +228,16 @@ Example: \(1.2\,\mathrm{kW}\) → \(N_5 = 100\) pulses in 5 minutes; 50 pulses i
 
 - XIAO **3.3V** powers **DS3231** and **TEMT6000**; all module GNDs common with XIAO GND.
 - **TEMT6000 must be always-on 3.3V** (not GPIO-switched); otherwise it cannot assert D2 during deep sleep.
-- Battery path: **LiPo → TP4056 → XIAO BAT+/GND**. Typical divider: **200 kΩ + 200 kΩ** (1%, 220 kΩ acceptable) from BAT+ to A0 midpoint to GND (matches FW 1:2 scale).
+- Battery path: **LiPo soldered to XIAO BAT+/GND**; USB charge via onboard **ETA4054** (~370 mA). Typical divider: **200 kΩ + 200 kΩ** (1%, 220 kΩ acceptable) from BAT+ to A0 midpoint to GND (matches FW 1:2 scale). No external TP4056 (or other charger) in parallel on the same cell.
 - **A0/GPIO2 is a strapping pin** — must not be held LOW at boot; the high-impedance divider keeps the pin near mid-rail (~1.85 V on a typical cell).
 - DS3231 breakouts often include **AT24C32 EEPROM**; firmware **does not use it** (LittleFS on internal flash only).
 - Optional **4.7 kΩ** I2C pull-ups if the breakout lacks them.
-- TP4056: replace RPROG 1.2 kΩ with **~3 kΩ** (~400 mA charge) when using that charger module.
 - Build prep: desolder DS3231 module power LED (idle drain); opaque shield/tape on TEMT6000 against ambient light; keep upload button accessible; verify divider with a multimeter before connecting the battery.
 
 **Battery ADC (firmware):**
 
 - `battery::begin()` configures ADC1 on `BatteryAdcPin` at 12-bit width and `ADC_ATTEN_DB_12` (Arduino pin attenuation still set via `ADC_11db` alias), then calls `esp_adc_cal_characterize` (prefer eFuse TP_FIT → TP → VREF; else default Vref 1100 mV). `calibrationOk()` is true only for eFuse sources; serial logs `source=` / `ok=` and warns on default Vref.
-- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; percent maps linearly 3.30 V → 0%, 4.20 V → 100%.
+- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; `estimatePercent` maps volts → SoC via a **piecewise-linear single-cell LiPo resting OCV** table (descending breakpoints from 4.20 V → 100% through mid-curve knees such as 3.61 V → 5%, down to 3.30 V → 0%; clamp above/below ends; linear interpolate between neighbors, round to nearest int). Anchored for ETA4054 + LiPo so ~3.63 V (USB charge-start cal 2026-08-02) reports ~6%, not the old linear ~37%. Same curve is mirrored in the backend HTML UI fallback (`estimatePercentFromVolts`) when a reading lacks `battery_pct_est`.
 - `sampleForRecord()` forces `WIFI_OFF` if needed, waits `BatteryAdcSettleMs` (default 80 ms), then `sample()`. Used by RTC roll (local `batteryMv` only) and once on upload wake (same sample for roll mV and first-POST top-level JSON). Diagnostics `status` / `dump` use `sample()` only.
 - With `EnableSerialLogs`, battery voltage is logged at **3 decimal places** (`%.3fV`) on RTC roll, upload batch, `status`, and related paths.
 
@@ -396,6 +401,10 @@ When `markSyncedThrough(newestSequence)` runs after HTTP 200/201 with readings:
 2. Call `compactRecords()`, which rewrites `/records.bin` keeping only records with `sequence > syncedThrough` (temp file → remove → rename).
 
 Empty successful heartbeats (`batch.count == 0`) do **not** call `markSyncedThrough` and therefore do **not** compact. `repairSyncState()` on boot mismatch may also invoke `compactRecords()`.
+
+### TLS and server trust
+
+Upload POSTs use `WiFiClientSecure` with HTTP Basic Auth (`BasicAuthUser` / `BasicAuthPassword`). Unless `AllowInsecureTls` is true, a non-empty `TlsCaCert` is passed to `setCACert` (default `IsrgRootCerts` — ISRG Root X1 + X2). Pin the public CA roots, not the server’s short-lived Let’s Encrypt leaf, so Caddy/automatic renewals on the backend do not require reflashing devices.
 
 ### Batch / error payload
 

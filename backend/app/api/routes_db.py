@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse
 
+from app.core.auth import require_basic_auth
 from app.db import db_path, init_db, replace_db_file, reset_db
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_basic_auth)])
 
 
 @router.get("/db")

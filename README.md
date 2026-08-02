@@ -19,7 +19,7 @@ See [docs/README.md](docs/README.md) for the documentation index. Package bounda
 - DS3231 + AT24C32 I2C breakout
 - TEMT6000 light sensor breakout powered continuously from 3.3V
 - Upload button on D1 to GND
-- LiPo battery with TP4056 charger
+- LiPo on XIAO BAT+/GND (onboard ETA4054 charge via USB)
 - 200 kOhm / 200 kOhm battery divider into A0
 
 ## Pin Map
@@ -47,7 +47,7 @@ At minimum, configure:
 - `UploadUrl`
 - `BasicAuthUser`
 - `BasicAuthPassword`
-- `TlsCaCert` or development-only `AllowInsecureTls`
+- `TlsCaCert` (defaults to vendored Let’s Encrypt ISRG roots via `certs/isrg_roots.h`; use `AllowInsecureTls` only for local HTTP)
 
 ## Build
 

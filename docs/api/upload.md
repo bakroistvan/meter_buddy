@@ -105,12 +105,19 @@ Errors are stored in the dump `raw_json` (no dedicated SQL table in v1).
 
 ## Related endpoints (backend UI / clients)
 
+Every backend route requires HTTP Basic Auth (`METER_BUDDY_AUTH_USER` / `METER_BUDDY_AUTH_PASSWORD`) except `GET /healthz`. OpenAPI (`/docs`, `/redoc`, `/openapi.json`) is disabled unless `METER_BUDDY_ENABLE_DOCS=1`.
+
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/` | none | HTML index of dumps |
-| `GET` | `/dumps/{id}/preview` | none | Raw dump JSON inline |
-| `GET` | `/dumps/{id}.json` | none | Dump JSON as download |
-| `WS` | `/ws` | none | Push `{ "type": "new_dump", "dump": {…meta} }` |
+| `POST` | `/api/meter-buddy/upload` | Basic | Device ingest (this contract) |
+| `GET` | `/healthz` | none | Liveness (Docker/Caddy health) |
+| `GET` | `/` | Basic | HTML index of dumps |
+| `GET` | `/dumps` | Basic | Dump list meta JSON |
+| `GET` | `/dumps/{id}/preview` | Basic | Raw dump JSON inline |
+| `GET` | `/dumps/{id}.json` | Basic | Dump JSON as download |
+| `DELETE` | `/dumps` / `/dumps/{id}` | Basic | Delete dumps |
+| `GET`/`POST`/`DELETE` | `/db` | Basic | Download / replace / reset SQLite |
+| `WS` | `/ws` | Basic | Push `{ "type": "new_dump", "dump": {…meta} }` |
 
 Dump list / meta battery fields are read with `json_extract` on top-level `raw_json` (`$.battery_v` / `$.battery_pct_est`). The HTML index formats `battery_v` with three decimal places in the dump list, chart panel, and telemetry readout. `store_upload` persists `raw_json` via `model_dump(..., exclude_none=True)` so omitted optional keys stay omitted in stored JSON.
 
@@ -118,8 +125,9 @@ Dump list / meta battery fields are read with `json_extract` on top-level `raw_j
 
 Set in `include/local_config.h` (or example defaults):
 
-- `UploadUrl` — full URL ending in `/api/meter-buddy/upload`
+- `UploadUrl` — full HTTPS URL ending in `/api/meter-buddy/upload`
 - `BasicAuthUser` / `BasicAuthPassword` — must match backend env
+- `TlsCaCert` — default `IsrgRootCerts` from `include/certs/isrg_roots.h` (ISRG Root X1 + X2); do not pin the rotating Let’s Encrypt leaf. Set `AllowInsecureTls = false` for production HTTPS.
 
 ## Firmware body builder
 

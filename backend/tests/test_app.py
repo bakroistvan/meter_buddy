@@ -4,6 +4,8 @@ import base64
 import importlib
 import os
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 
@@ -45,24 +47,24 @@ def test_upload_index_and_download(tmp_path, monkeypatch):
         assert response.status_code == 201
         assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 1}
 
-        index = client.get("/")
+        index = client.get("/", headers=auth_header())
         assert index.status_code == 200
         assert "meter-buddy-001" in index.text
         assert '"id": 1' in index.text
 
-        dump = client.get("/dumps/1.json")
+        dump = client.get("/dumps/1.json", headers=auth_header())
         assert dump.status_code == 200
         assert dump.headers["content-type"].startswith("application/json")
         assert 'filename="meter-buddy-dump-1.json"' in dump.headers["content-disposition"]
         assert dump.json()["readings"][0]["pulses"] == 42
 
-        preview = client.get("/dumps/1/preview")
+        preview = client.get("/dumps/1/preview", headers=auth_header())
         assert preview.status_code == 200
         assert preview.headers["content-type"].startswith("application/json")
         assert "content-disposition" not in preview.headers
         assert preview.json()["readings"][0]["pulses"] == 42
 
-        missing = client.get("/dumps/999/preview")
+        missing = client.get("/dumps/999/preview", headers=auth_header())
         assert missing.status_code == 404
 
 
@@ -99,22 +101,22 @@ def test_delete_dump_and_bulk_delete(tmp_path, monkeypatch):
             )
             assert response.status_code == 201
 
-        delete_one = client.delete("/dumps/2")
+        delete_one = client.delete("/dumps/2", headers=auth_header())
         assert delete_one.status_code == 200
         assert delete_one.json() == {"ok": True, "deleted_id": 2}
 
-        assert client.get("/dumps/2.json").status_code == 404
-        assert client.get("/dumps/1.json").status_code == 200
-        assert client.get("/dumps/3.json").status_code == 200
+        assert client.get("/dumps/2.json", headers=auth_header()).status_code == 404
+        assert client.get("/dumps/1.json", headers=auth_header()).status_code == 200
+        assert client.get("/dumps/3.json", headers=auth_header()).status_code == 200
 
-        delete_bulk = client.delete("/dumps?up_to_id=1")
+        delete_bulk = client.delete("/dumps?up_to_id=1", headers=auth_header())
         assert delete_bulk.status_code == 200
         assert delete_bulk.json() == {"ok": True, "deleted_count": 1}
 
-        assert client.get("/dumps/1.json").status_code == 404
-        assert client.get("/dumps/3.json").status_code == 200
+        assert client.get("/dumps/1.json", headers=auth_header()).status_code == 404
+        assert client.get("/dumps/3.json", headers=auth_header()).status_code == 200
 
-        missing = client.delete("/dumps/999")
+        missing = client.delete("/dumps/999", headers=auth_header())
         assert missing.status_code == 404
 
 
@@ -128,7 +130,7 @@ def test_websocket_receives_new_dump_notification(tmp_path, monkeypatch):
     importlib.reload(app.main)
 
     with TestClient(app.main.app) as client:
-        with client.websocket_connect("/ws") as ws:
+        with client.websocket_connect("/ws", headers=auth_header()) as ws:
             payload = {
                 "device_id": "meter-buddy-002",
                 "meter_impulses_per_kwh": 1000,
@@ -217,7 +219,7 @@ def test_empty_readings_with_errors_and_battery(tmp_path, monkeypatch):
         assert response.status_code == 201
         assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 0}
 
-        dump = client.get("/dumps/1.json")
+        dump = client.get("/dumps/1.json", headers=auth_header())
         assert dump.status_code == 200
         body = dump.json()
         assert body["readings"] == []
@@ -276,7 +278,7 @@ def test_upload_omits_battery_fields(tmp_path, monkeypatch):
         assert response.status_code == 201
         assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 1}
 
-        dump = client.get("/dumps/1.json")
+        dump = client.get("/dumps/1.json", headers=auth_header())
         assert dump.status_code == 200
         body = dump.json()
         assert "battery_v" not in body
@@ -284,7 +286,43 @@ def test_upload_omits_battery_fields(tmp_path, monkeypatch):
         assert "battery_v" not in body["readings"][0]
         assert "battery_pct_est" not in body["readings"][0]
 
-        dumps = client.get("/dumps").json()
+        dumps = client.get("/dumps", headers=auth_header()).json()
         assert dumps[0]["battery_v"] is None
         assert dumps[0]["battery_pct_est"] is None
 
+
+def test_protected_routes_require_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    with TestClient(app.main.app) as client:
+        assert client.get("/").status_code == 401
+        assert client.get("/dumps").status_code == 401
+        assert client.get("/db").status_code == 401
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/healthz").json() == {"ok": True}
+        try:
+            with client.websocket_connect("/ws"):
+                raise AssertionError("unauthenticated websocket should fail")
+        except Exception:
+            pass
+
+
+def test_rejects_default_password_without_allow_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(tmp_path / "meter_buddy.sqlite3"))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+    monkeypatch.delenv("METER_BUDDY_ALLOW_INSECURE_AUTH", raising=False)
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    with pytest.raises(RuntimeError, match="METER_BUDDY_AUTH_PASSWORD"):
+        with TestClient(app.main.app):
+            pass

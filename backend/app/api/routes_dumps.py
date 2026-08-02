@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
+from app.core.auth import require_basic_auth
 from app.db import delete_dump, delete_dumps_up_to, get_dump_json, list_dumps
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_basic_auth)])
 
 
 @router.get("/dumps")
 def list_dumps_endpoint() -> list[dict]:
     return [dict(row) for row in list_dumps()]
-
 
 
 @router.get("/dumps/{dump_id}/preview")

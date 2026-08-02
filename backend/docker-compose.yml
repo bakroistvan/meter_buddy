@@ -1,17 +1,41 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - METER_BUDDY_DOMAIN=${METER_BUDDY_DOMAIN:?Set METER_BUDDY_DOMAIN to your public hostname}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
-      # Runtime injection only (not baked into the image). Override for non-local use.
       - METER_BUDDY_AUTH_USER=${METER_BUDDY_AUTH_USER:-meter-buddy}
-      - METER_BUDDY_AUTH_PASSWORD=${METER_BUDDY_AUTH_PASSWORD:-change-me}
+      - METER_BUDDY_AUTH_PASSWORD=${METER_BUDDY_AUTH_PASSWORD:?Set METER_BUDDY_AUTH_PASSWORD to a strong secret}
       - METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3
     volumes:
       - backend_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
 
 volumes:
   backend_data:
+  caddy_data:
+  caddy_config:

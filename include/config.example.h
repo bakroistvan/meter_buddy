@@ -1,5 +1,7 @@
 #pragma once
 
+#include "certs/isrg_roots.h"
+
 namespace config {
 
 constexpr const char *DeviceId = "meter-buddy-001";
@@ -14,10 +16,9 @@ constexpr const char *FirmwareVersion = "1.0.0";
 constexpr const char *BasicAuthUser = "meter-buddy";
 constexpr const char *BasicAuthPassword = "change-me";
 
-// Replace with your server CA certificate or pinned certificate in PEM format.
-// Keep empty only for local development if AllowInsecureTls is true.
-constexpr const char *TlsCaCert = R"EOF(
-)EOF";
+// Default: vendored Let's Encrypt ISRG Root X1 + X2 (see certs/isrg_roots.h).
+// Override only if pinning a different CA. Do not paste rotating leaf certs here.
+constexpr const char *TlsCaCert = IsrgRootCerts;
 
 constexpr bool AllowInsecureTls = false;
 constexpr uint32_t WifiConnectTimeoutMs = 30000;

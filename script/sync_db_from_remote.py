@@ -2,12 +2,14 @@
 """Replace the local Meter Buddy SQLite DB with a copy from a remote backend.
 
 Deletes the DB on localhost, downloads /db from the remote host, then uploads
-it to localhost.
+it to localhost. Both endpoints require HTTP Basic Auth.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import os
 import sys
 import urllib.error
 import urllib.request
@@ -17,8 +19,20 @@ DEFAULT_LOCAL = "http://127.0.0.1:8000"
 DEFAULT_REMOTE = "http://192.168.40.222:8000"
 
 
-def request(method: str, url: str, data: bytes | None = None, content_type: str | None = None) -> bytes:
-    headers: dict[str, str] = {}
+def auth_header(user: str, password: str) -> str:
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return f"Basic {token}"
+
+
+def request(
+    method: str,
+    url: str,
+    *,
+    authorization: str,
+    data: bytes | None = None,
+    content_type: str | None = None,
+) -> bytes:
+    headers: dict[str, str] = {"Authorization": authorization}
     if content_type is not None:
         headers["Content-Type"] = content_type
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -46,16 +60,29 @@ def main() -> int:
         default=DEFAULT_REMOTE,
         help=f"Remote backend base URL (default: {DEFAULT_REMOTE})",
     )
+    parser.add_argument(
+        "--user",
+        default=os.getenv("METER_BUDDY_AUTH_USER", "meter-buddy"),
+        help="Basic Auth username (or METER_BUDDY_AUTH_USER)",
+    )
+    parser.add_argument(
+        "--password",
+        default=os.getenv("METER_BUDDY_AUTH_PASSWORD"),
+        help="Basic Auth password (or METER_BUDDY_AUTH_PASSWORD)",
+    )
     args = parser.parse_args()
+    if not args.password:
+        raise SystemExit("Pass --password or set METER_BUDDY_AUTH_PASSWORD")
 
+    authorization = auth_header(args.user, args.password)
     local = args.local.rstrip("/")
     remote = args.remote.rstrip("/")
 
     print(f"1/3 Deleting DB on {local} ...")
-    request("DELETE", f"{local}/db")
+    request("DELETE", f"{local}/db", authorization=authorization)
 
     print(f"2/3 Downloading DB from {remote} ...")
-    db_bytes = request("GET", f"{remote}/db")
+    db_bytes = request("GET", f"{remote}/db", authorization=authorization)
     if not db_bytes:
         raise SystemExit("Remote returned an empty database file")
 
@@ -63,6 +90,7 @@ def main() -> int:
     request(
         "POST",
         f"{local}/db",
+        authorization=authorization,
         data=db_bytes,
         content_type="application/x-sqlite3",
     )

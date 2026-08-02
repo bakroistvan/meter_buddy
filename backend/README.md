@@ -1,6 +1,6 @@
 # Meter Buddy Backend
 
-FastAPI proof-of-concept backend for receiving Meter Buddy upload payloads, storing them in SQLite, and exposing a basic index page with JSON dump downloads.
+FastAPI backend for receiving Meter Buddy upload payloads, storing them in SQLite, and exposing an authenticated index page with JSON dump downloads.
 
 Upload contract: [docs/api/upload.md](../docs/api/upload.md).
 
@@ -18,9 +18,11 @@ backend/
 │   └── templates/
 ├── tests/
 ├── data/                 # local SQLite (gitignored content)
+├── Caddyfile             # Let's Encrypt reverse proxy
 ├── docker-compose.yml
 ├── Dockerfile
-└── requirements.txt
+├── requirements.txt      # runtime
+└── requirements-dev.txt  # runtime + pytest/httpx
 ```
 
 ## Setup
@@ -29,48 +31,50 @@ backend/
 cd backend
 python3 -m venv .venv
 # Windows: python -m venv .venv
-./.venv/bin/python -m pip install -r requirements.txt
-# Windows: .\.venv\Scripts\python -m pip install -r requirements.txt
+./.venv/bin/python -m pip install -r requirements-dev.txt
+# Windows: .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 ```
 
-## Run
+## Run (local, no Docker)
+
+Local uvicorn allows the default password only with `METER_BUDDY_ALLOW_INSECURE_AUTH=1`:
 
 ```powershell
 cd backend
 $env:METER_BUDDY_AUTH_USER="meter-buddy"
 $env:METER_BUDDY_AUTH_PASSWORD="change-me"
+$env:METER_BUDDY_ALLOW_INSECURE_AUTH="1"
 .\.venv\Scripts\python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Open:
+Open `http://127.0.0.1:8000/` (browser prompts for Basic Auth). Liveness: `GET /healthz` (no auth).
 
-```text
-http://127.0.0.1:8000/
-```
+## Running with Docker / Docker Compose (HTTPS + Let’s Encrypt)
 
-## Running with Docker / Docker Compose
+**Requirements:** a public DNS name (`A`/`AAAA`) pointing at this host, and inbound TCP **80** + **443** for ACME HTTP-01.
 
-From the **`backend/`** directory:
+From **`backend/`**:
 
 ```bash
-cd backend
+export METER_BUDDY_DOMAIN=meter.example.com
+export METER_BUDDY_AUTH_USER=meter-buddy
+export METER_BUDDY_AUTH_PASSWORD='your-strong-secret'
 docker compose up --build -d
 ```
 
-This starts the FastAPI backend on port `8000` (`http://127.0.0.1:8000/`). The SQLite database is stored in a persistent Docker volume named `backend_data`.
+Compose starts:
 
-`docker-compose.yml` injects auth credentials at **runtime** (local defaults `meter-buddy` / `change-me`). Override the password for anything beyond local use, for example:
+- **Caddy** on host ports 80/443 — automatic Let’s Encrypt certificate for `$METER_BUDDY_DOMAIN`, reverse-proxies to the backend
+- **backend** — internal only (no published `8000`); non-root image; `read_only` + dropped capabilities
+
+The app refuses to start if `METER_BUDDY_AUTH_PASSWORD` is missing or still `change-me` (Compose does not set `METER_BUDDY_ALLOW_INSECURE_AUTH`).
+
+UI: `https://$METER_BUDDY_DOMAIN/` (Basic Auth). Upload: `https://$METER_BUDDY_DOMAIN/api/meter-buddy/upload`.
+
+To run a pre-built image behind your own TLS proxy:
 
 ```bash
-METER_BUDDY_AUTH_PASSWORD='your-secret' docker compose up --build -d
-```
-
-Or edit the Compose `environment` / use an `env_file` that is not committed.
-
-To run a pre-built image (e.g. from GHCR) without Compose:
-
-```bash
-docker run --rm -p 8000:8000 \
+docker run --rm \
   -e METER_BUDDY_AUTH_USER=meter-buddy \
   -e METER_BUDDY_AUTH_PASSWORD='your-secret' \
   -e METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3 \
@@ -78,35 +82,46 @@ docker run --rm -p 8000:8000 \
   ghcr.io/<owner>/meter_buddy:latest
 ```
 
-The Dockerfile does **not** bake `METER_BUDDY_AUTH_USER` or `METER_BUDDY_AUTH_PASSWORD` into the image. In CI/production, set them from GitHub Secrets, orchestrator secrets, or `docker -e` — never via image `ENV`/`ARG`.
+The Dockerfile does **not** bake auth credentials into the image.
 
-To run tests inside the Docker container:
+## HTTPS (Let’s Encrypt) + firmware TLS
+
+Leaf certificates renew automatically via Caddy. Firmware must pin the **ISRG roots**, not the leaf.
+
+1. Deploy Compose as above; confirm `https://$METER_BUDDY_DOMAIN/` prompts for Basic Auth.
+2. In `include/local_config.h` (from `config.example.h`):
+   - `UploadUrl = "https://<domain>/api/meter-buddy/upload"`
+   - Matching `BasicAuthUser` / `BasicAuthPassword`
+   - `#include "certs/isrg_roots.h"` and `TlsCaCert = IsrgRootCerts` (vendored X1 + X2)
+   - `AllowInsecureTls = false`
+3. Rebuild/flash firmware.
+
+Routine Let’s Encrypt renewals need **no** firmware change. Root updates are rare; maintainers refresh with:
 
 ```bash
-cd backend
-docker compose run --entrypoint "python -m pytest tests" backend
+python script/refresh_isrg_roots.py
 ```
+
+Sources: https://letsencrypt.org/certs/isrgrootx1.pem and https://letsencrypt.org/certs/isrg-root-x2.pem — index at https://letsencrypt.org/certificates/
 
 ## Configuration
 
 Environment variables:
 
-- `METER_BUDDY_DB_PATH`
-  - Default: `backend/data/meter_buddy.sqlite3` (relative to the backend package when unset); Docker image default `/data/meter_buddy.sqlite3`
-- `METER_BUDDY_AUTH_USER`
-  - App fallback when unset: `meter-buddy`
-  - Inject at runtime for Docker/deployed runs (not set in the Dockerfile)
-- `METER_BUDDY_AUTH_PASSWORD`
-  - App fallback when unset: `change-me` (local/dev only)
-  - **Inject at runtime for Docker/deployed runs** — pass via Compose, `docker -e`, or secrets; not set in the Dockerfile
+- `METER_BUDDY_DB_PATH` — default `backend/data/meter_buddy.sqlite3` locally; Docker `/data/meter_buddy.sqlite3`
+- `METER_BUDDY_AUTH_USER` — default `meter-buddy`
+- `METER_BUDDY_AUTH_PASSWORD` — required strong secret in production; default `change-me` only with `METER_BUDDY_ALLOW_INSECURE_AUTH=1`
+- `METER_BUDDY_ALLOW_INSECURE_AUTH` — `1` for local/tests only (never in Compose)
+- `METER_BUDDY_ENABLE_DOCS` — `1` to expose `/docs` / OpenAPI (off by default)
+- `METER_BUDDY_DOMAIN` — public hostname for Caddy Let’s Encrypt (Compose)
 
-Use a real password and HTTPS for anything reachable outside your machine.
+All HTTP routes and `/ws` require Basic Auth except `/healthz`.
 
 ## Example Upload
 
 ```bash
 curl -i \
-  -u 'meter-buddy:change-me' \
+  -u 'meter-buddy:your-strong-secret' \
   -H 'Content-Type: application/json' \
   -d '{
     "device_id": "meter-buddy-001",
@@ -122,25 +137,16 @@ curl -i \
       }
     ]
   }' \
-  http://127.0.0.1:8000/api/meter-buddy/upload
+  https://meter.example.com/api/meter-buddy/upload
 ```
 
 ## Test
 
-Install dependencies first (`pip install -r requirements.txt` from `backend/`, or `pip install -r backend/requirements.txt` from the repo root). Then:
-
 ```bash
-# From backend/
+# From backend/ (needs requirements-dev.txt)
 ./.venv/bin/python -m pytest tests
 
-# Or from repo root (same suite):
+# Or from repo root:
+python -m pip install -r backend/requirements-dev.txt
 python -m pytest -q backend
-```
-
-## Firmware URL
-
-For local LAN testing through a tunnel or reverse proxy, configure firmware `UploadUrl` to:
-
-```text
-https://your-public-host.example/api/meter-buddy/upload
 ```
