@@ -3,7 +3,7 @@
 **Status:** living hardware schematic. Pin map and power topology match [firmware/fw_specification.md](../firmware/fw_specification.md) (Hardware assumptions) and [include/pins.h](../../include/pins.h).  
 **CAD import:** EasyEDA Pro netlist rebuild file — [meter_buddy.netlist.json](meter_buddy.netlist.json).
 
-This is a **breakout / module** schematic (not a custom PCB SoC design): Seeed XIAO ESP32-C3 + DS3231/AT24C32 + TEMT6000 + TP4056 + LiPo.
+This is a **breakout / module** schematic (not a custom PCB SoC design): Seeed XIAO ESP32-C3 + DS3231/AT24C32 + TEMT6000 + LiPo on XIAO BAT pads (onboard **ETA4054** charge).
 
 ---
 
@@ -11,8 +11,9 @@ This is a **breakout / module** schematic (not a custom PCB SoC design): Seeed X
 
 ```mermaid
 flowchart LR
-  BAT["LiPo 3.7 V"] --> TP["TP4056<br/>RPROG ≈ 3 kΩ"]
-  TP --> BATPAD["XIAO BAT+ / GND"]
+  USB["USB 5 V"] --> ETA["XIAO onboard<br/>ETA4054 ~370 mA"]
+  ETA --> BATPAD["XIAO BAT+ / GND"]
+  BAT["LiPo<br/>e.g. KXD 383450PL M"] --> BATPAD
   BAT --> DIV["R1+R2 200 kΩ<br/>1:2 divider"]
   DIV --> A0["XIAO A0 / D0"]
 
@@ -34,11 +35,10 @@ flowchart LR
 
 | Ref | Part | Role |
 | --- | --- | --- |
-| U1 | Seeed Studio XIAO ESP32-C3 | MCU, Wi‑Fi, ADC, deep-sleep wake |
+| U1 | Seeed Studio XIAO ESP32-C3 | MCU, Wi‑Fi, ADC, deep-sleep wake; onboard **ETA4054** LiPo charger |
 | U2 | DS3231 + AT24C32 I2C breakout | RTC alarm wake (SQW). EEPROM unused by firmware |
 | U3 | TEMT6000 light-sensor breakout | Meter optical pulse → active-LOW wake on D2 |
-| U4 | TP4056 LiPo charger module | USB charge into battery / XIAO BAT pads |
-| BT1 | LiPo cell (e.g. 3.7 V) | Main power |
+| BT1 | LiPo cell (e.g. KXD 383450PL M 650 mAh) | Main power; soldered to XIAO BAT+/GND |
 | SW1 | Momentary SPST | Upload / stay-awake button to GND |
 | R1 | 200 kΩ 1% | Battery divider upper (BAT+ → A0) |
 | R2 | 200 kΩ 1% | Battery divider lower (A0 → GND); 220 kΩ pair also OK |
@@ -46,11 +46,12 @@ flowchart LR
 | R4 | 330 Ω | Status LED series (anode side) |
 | R5 | 4.7 kΩ | Optional I2C SDA pull-up to 3.3 V |
 | R6 | 4.7 kΩ | Optional I2C SCL pull-up to 3.3 V |
-| R7 | 3 kΩ | TP4056 RPROG substitute (~400 mA charge) |
 | D1 | LED | Pulse indicator (D8) |
 | D2 | LED | Status / awake indicator (D10) |
 
 `R3`/`R4` values are not firmware-critical; pick for LED Vf / brightness at 3.3 V. `R5`/`R6` only if the DS3231 breakout lacks on-board pull-ups.
+
+No external charger module — do **not** put a TP4056 (or similar) in parallel with the ETA4054 on the same cell.
 
 ---
 
@@ -67,8 +68,8 @@ flowchart LR
 | `LED_PULSE` | D8 | GPIO8 | R3 → D1 anode; cathode → `GND` |
 | `LED_STATUS` | D10 | GPIO10 | R4 → D2 anode; cathode → `GND` |
 | `V3V3` | 3.3V | — | U2 VCC, U3 VCC, optional R5/R6 |
-| `GND` | GND | — | Common ground |
-| `VBAT` | BAT+ (underside) | — | BT1 +, U4 B+, R1 |
+| `GND` | GND | — | Common ground; BT1 − |
+| `VBAT` | BAT+ (underside) | — | BT1 +, R1; charged by onboard ETA4054 when USB is plugged in |
 
 Wake edges: deep-sleep GPIO **LOW**; awake pulse ISR **FALLING** (see fw_specification).
 
@@ -79,13 +80,13 @@ Wake edges: deep-sleep GPIO **LOW**; awake pulse ISR **FALLING** (see fw_specifi
 ### Power
 
 ```
-BT1+ ──┬── U4.B+ ── U1.BAT+ ── R1 ──┬── U1.A0 / D0   (net VBAT_SENSE)
-       │                             │
-BT1− ──┴── U4.B− ── U1.GND          R2
-                                     │
-                                    GND
+BT1+ ── U1.BAT+ ── R1 ──┬── U1.A0 / D0   (net VBAT_SENSE)
+                        │
+BT1− ── U1.GND         R2
+                        │
+                       GND
 
-U4.IN+ / IN− ← USB 5 V charge input (module pads)
+USB 5 V → U1 USB → onboard ETA4054 → U1.BAT+  (~370 mA charge)
 U1.3V3 ── U2.VCC, U3.VCC
 All module GNDs tied to U1.GND
 ```
@@ -106,6 +107,12 @@ All module GNDs tied to U1.GND
 
 ## 5. Subcircuit notes
 
+### Battery / charge
+
+- **LiPo soldered directly** to XIAO underside **BAT+** / **GND**.
+- Charge via XIAO USB → onboard **ETA4054** (~370 mA fixed). Suitable for ≥~370 mAh cells (e.g. 650 mAh KXD 383450PL M).
+- Sense path is the external divider only; the ETA4054 is not firmware-controlled.
+
 ### Battery divider
 
 - Ratio **1:2**; firmware multiplies ADC volts by 2.
@@ -123,11 +130,6 @@ All module GNDs tied to U1.GND
 - Desolder module power LED to cut idle drain.
 - Add R5/R6 if the breakout has no I2C pull-ups.
 
-### TP4056
-
-- Replace stock RPROG (~1.2 kΩ) with **R7 ≈ 3 kΩ** (~400 mA).
-- Battery path: **LiPo → TP4056 B± → XIAO BAT+/GND**.
-
 ### LEDs
 
 - Anode driven from GPIO through series resistor; cathode to GND (active HIGH).
@@ -137,12 +139,12 @@ All module GNDs tied to U1.GND
 ## 6. Build checklist
 
 - [ ] DS3231 power LED removed
-- [ ] TP4056 RPROG → ~3 kΩ
+- [ ] LiPo soldered to XIAO BAT+/GND only (no external TP4056 on the same cell)
 - [ ] Divider soldered BAT+ → R1 → A0 → R2 → GND; verified mid-point with meter before full assembly
 - [ ] TEMT6000 on 3.3 V continuous; optical shield fitted
 - [ ] Upload button accessible; D1 to GND only
 - [ ] Pulse LED on **D8**; status LED on **D10** (not archive D9)
-- [ ] Common ground across XIAO, RTC, TEMT, divider, button, charger
+- [ ] Common ground across XIAO, RTC, TEMT, divider, button
 
 ---
 

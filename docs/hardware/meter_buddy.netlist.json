@@ -45,19 +45,6 @@
       "3": "PULSE"
     }
   },
-  "U4": {
-    "props": {
-      "Designator": "U4",
-      "DeviceName": "TP4056",
-      "Value": "TP4056"
-    },
-    "pins": {
-      "1": "USB5V",
-      "2": "GND",
-      "3": "VBAT",
-      "4": "GND"
-    }
-  },
   "BT1": {
     "props": {
       "Designator": "BT1",
@@ -144,17 +131,6 @@
     "pins": {
       "1": "V3V3",
       "2": "SCL"
-    }
-  },
-  "R7": {
-    "props": {
-      "Designator": "R7",
-      "DeviceName": "R",
-      "Value": "3k"
-    },
-    "pins": {
-      "1": "U4_RPROG_A",
-      "2": "U4_RPROG_B"
     }
   },
   "D1": {
