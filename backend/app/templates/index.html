@@ -674,11 +674,29 @@
       }
 
 
+      // Piecewise LiPo resting OCV → SoC (must match battery::estimatePercent).
+      var BATTERY_OCV_CURVE = [
+        [4.20, 100], [4.15, 95], [4.11, 90], [4.08, 85], [4.02, 80],
+        [3.98, 75], [3.95, 70], [3.91, 65], [3.87, 60], [3.85, 55],
+        [3.84, 50], [3.82, 45], [3.80, 40], [3.79, 35], [3.77, 30],
+        [3.75, 25], [3.73, 20], [3.71, 15], [3.69, 10], [3.61, 5],
+        [3.30, 0]
+      ];
+
       function estimatePercentFromVolts(volts) {
         if (volts == null || !Number.isFinite(volts)) return null;
-        if (volts >= 4.2) return 100;
-        if (volts <= 3.3) return 0;
-        return (volts - 3.3) * 100 / (4.2 - 3.3);
+        var curve = BATTERY_OCV_CURVE;
+        if (volts >= curve[0][0]) return 100;
+        if (volts <= curve[curve.length - 1][0]) return 0;
+        for (var i = 0; i + 1 < curve.length; i++) {
+          var vHi = curve[i][0], pHi = curve[i][1];
+          var vLo = curve[i + 1][0], pLo = curve[i + 1][1];
+          if (volts <= vHi && volts >= vLo) {
+            if (vHi === vLo) return pHi;
+            return pLo + (volts - vLo) / (vHi - vLo) * (pHi - pLo);
+          }
+        }
+        return 0;
       }
 
       function readingBatteryPct(r) {

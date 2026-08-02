@@ -149,15 +149,40 @@ Reading sampleForRecord() {
 }
 
 uint8_t estimatePercent(float volts) {
-  if (volts >= 4.20f) {
+  // Piecewise-linear single-cell LiPo resting OCV → SoC.
+  // Anchored so ~3.63 V (USB charge start 2026-08-02) maps near empty (~6%),
+  // not the old linear 3.30–4.20 map which reported ~37% there.
+  static constexpr struct {
+    float volts;
+    uint8_t percent;
+  } kOcv[] = {
+      {4.20f, 100}, {4.15f, 95}, {4.11f, 90}, {4.08f, 85}, {4.02f, 80},
+      {3.98f, 75},  {3.95f, 70}, {3.91f, 65}, {3.87f, 60}, {3.85f, 55},
+      {3.84f, 50},  {3.82f, 45}, {3.80f, 40}, {3.79f, 35}, {3.77f, 30},
+      {3.75f, 25},  {3.73f, 20}, {3.71f, 15}, {3.69f, 10}, {3.61f, 5},
+      {3.30f, 0},
+  };
+  constexpr size_t kCount = sizeof(kOcv) / sizeof(kOcv[0]);
+
+  if (volts >= kOcv[0].volts) {
     return 100;
   }
-  if (volts <= 3.30f) {
+  if (volts <= kOcv[kCount - 1].volts) {
     return 0;
   }
 
-  const float pct = (volts - 3.30f) * 100.0f / (4.20f - 3.30f);
-  return static_cast<uint8_t>(constrain(static_cast<int>(pct + 0.5f), 0, 100));
+  for (size_t i = 0; i + 1 < kCount; ++i) {
+    const float vHi = kOcv[i].volts;
+    const float vLo = kOcv[i + 1].volts;
+    if (volts <= vHi && volts >= vLo) {
+      const float pHi = static_cast<float>(kOcv[i].percent);
+      const float pLo = static_cast<float>(kOcv[i + 1].percent);
+      const float t = (volts - vLo) / (vHi - vLo);
+      const float pct = pLo + t * (pHi - pLo);
+      return static_cast<uint8_t>(constrain(static_cast<int>(pct + 0.5f), 0, 100));
+    }
+  }
+  return 0;
 }
 
 } // namespace battery

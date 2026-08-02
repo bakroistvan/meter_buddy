@@ -170,9 +170,9 @@ def plot_curves(
 
     ax = axes[0]
     ax.scatter(real_v, real_pct, s=12, alpha=0.35, color="#0f766e", label=f"readings (n={len(with_pct)})")
-    ax.plot(v_grid, theory_pct, color="#b45309", linewidth=2.2, label="theory LiPo OCV")
+    ax.plot(v_grid, theory_pct, color="#b45309", linewidth=2.2, label="firmware / theory LiPo OCV")
     ax.plot(v_grid, fit_pct, color="#1d4ed8", linewidth=2.2, label=f"fit poly deg {fit.degree()}")
-    ax.plot(v_grid, linear_pct, color="#6b7280", linewidth=1.4, linestyle="--", label="firmware linear")
+    ax.plot(v_grid, linear_pct, color="#6b7280", linewidth=1.4, linestyle="--", label="legacy linear 3.30–4.20")
     ax.set_xlabel("Battery voltage (V)")
     ax.set_ylabel("State of charge (%)")
     ax.set_title("SoC vs voltage")
