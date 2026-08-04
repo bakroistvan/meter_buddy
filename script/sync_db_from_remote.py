@@ -3,6 +3,8 @@
 
 Deletes the DB on localhost, downloads /db from the remote host, then uploads
 it to localhost. Both endpoints require HTTP Basic Auth.
+
+Auth defaults come from backend/.env (METER_BUDDY_AUTH_USER / METER_BUDDY_AUTH_PASSWORD).
 """
 
 from __future__ import annotations
@@ -13,10 +15,27 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 
 DEFAULT_LOCAL = "http://127.0.0.1:8000"
 DEFAULT_REMOTE = "http://192.168.40.222:8000"
+BACKEND_ENV = Path(__file__).resolve().parent.parent / "backend" / ".env"
+
+
+def load_env_file(path: Path) -> None:
+    """Load KEY=VALUE pairs into os.environ without overwriting existing vars."""
+    if not path.is_file():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip("'").strip('"')
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
 def auth_header(user: str, password: str) -> str:
@@ -49,6 +68,8 @@ def request(
 
 
 def main() -> int:
+    load_env_file(BACKEND_ENV)
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--local",
@@ -63,16 +84,18 @@ def main() -> int:
     parser.add_argument(
         "--user",
         default=os.getenv("METER_BUDDY_AUTH_USER", "meter-buddy"),
-        help="Basic Auth username (or METER_BUDDY_AUTH_USER)",
+        help="Basic Auth username (backend/.env or METER_BUDDY_AUTH_USER)",
     )
     parser.add_argument(
         "--password",
         default=os.getenv("METER_BUDDY_AUTH_PASSWORD"),
-        help="Basic Auth password (or METER_BUDDY_AUTH_PASSWORD)",
+        help="Basic Auth password (backend/.env or METER_BUDDY_AUTH_PASSWORD)",
     )
     args = parser.parse_args()
     if not args.password:
-        raise SystemExit("Pass --password or set METER_BUDDY_AUTH_PASSWORD")
+        raise SystemExit(
+            "Pass --password, set METER_BUDDY_AUTH_PASSWORD, or put it in backend/.env"
+        )
 
     authorization = auth_header(args.user, args.password)
     local = args.local.rstrip("/")
