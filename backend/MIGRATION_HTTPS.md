@@ -6,7 +6,7 @@ Checklist for a home server behind a router: DuckDNS name, one forwarded HTTPS p
 
 | Before | After |
 | --- | --- |
-| Host port `8000` published | HTTPS only on host **9111** (configurable) |
+| Host port `8000` published | HTTPS on host **9111** (configurable); plain HTTP on **9111** 308s to HTTPS (same port) |
 | HTTP | HTTPS + Let’s Encrypt (DuckDNS DNS-01) |
 | Only upload required Basic Auth | **All** routes + `/ws` require Basic Auth (`/healthz` excepted) |
 | Password may be `change-me` | Strong password **required** |
