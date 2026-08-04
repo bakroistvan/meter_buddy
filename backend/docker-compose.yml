@@ -1,15 +1,25 @@
+# Environment: copy .env.example → .env and edit (Compose loads .env automatically).
+#   cp .env.example .env
+#
+# Host: only HTTPS on METER_BUDDY_HTTPS_PORT (default 9111).
+# Router: port-forward WAN TCP 9111 → this host:9111.
+# ACME: DuckDNS DNS-01 (DUCKDNS_TOKEN) — port 80 not required.
+
 services:
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      - METER_BUDDY_DOMAIN=${METER_BUDDY_DOMAIN:?Set METER_BUDDY_DOMAIN to your public hostname}
+      - "${METER_BUDDY_HTTPS_PORT:-9111}:443"
+    env_file:
+      - .env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - meter_buddy
     depends_on:
       - backend
     restart: unless-stopped
@@ -18,14 +28,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    expose:
-      - "8000"
-    environment:
-      - METER_BUDDY_AUTH_USER=${METER_BUDDY_AUTH_USER:-meter-buddy}
-      - METER_BUDDY_AUTH_PASSWORD=${METER_BUDDY_AUTH_PASSWORD:?Set METER_BUDDY_AUTH_PASSWORD to a strong secret}
-      - METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3
+    env_file:
+      - .env
     volumes:
       - backend_data:/data
+    networks:
+      - meter_buddy
     read_only: true
     tmpfs:
       - /tmp
@@ -34,6 +42,10 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+
+networks:
+  meter_buddy:
+    driver: bridge
 
 volumes:
   backend_data:

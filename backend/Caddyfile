@@ -1,3 +1,9 @@
+# HTTPS on host METER_BUDDY_HTTPS_PORT (default 9111).
+# Certs via Let's Encrypt DNS-01 (DuckDNS) — no port 80 required.
 {$METER_BUDDY_DOMAIN} {
+	tls {
+		dns duckdns {$DUCKDNS_TOKEN}
+		resolvers 1.1.1.1 8.8.8.8
+	}
 	reverse_proxy backend:8000
 }

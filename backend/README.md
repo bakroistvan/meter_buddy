@@ -18,9 +18,11 @@ backend/
 │   └── templates/
 ├── tests/
 ├── data/                 # local SQLite (gitignored content)
-├── Caddyfile             # Let's Encrypt reverse proxy
+├── Caddyfile             # Let's Encrypt (DuckDNS DNS-01) reverse proxy
 ├── docker-compose.yml
-├── Dockerfile
+├── Dockerfile            # FastAPI backend
+├── Dockerfile.caddy      # Caddy + caddy-dns/duckdns
+├── .env.example          # copy to .env for Compose
 ├── requirements.txt      # runtime
 └── requirements-dev.txt  # runtime + pytest/httpx
 ```
@@ -49,27 +51,35 @@ $env:METER_BUDDY_ALLOW_INSECURE_AUTH="1"
 
 Open `http://127.0.0.1:8000/` (browser prompts for Basic Auth). Liveness: `GET /healthz` (no auth).
 
-## Running with Docker / Docker Compose (HTTPS + Let’s Encrypt)
+## Running with Docker / Docker Compose (HTTPS + DuckDNS)
 
-**Requirements:** a public DNS name (`A`/`AAAA`) pointing at this host, and inbound TCP **80** + **443** for ACME HTTP-01.
+Step-by-step cutover: [MIGRATION_HTTPS.md](MIGRATION_HTTPS.md).
+
+**Typical home setup:** DuckDNS name (e.g. `changeme.duckdns.org`) → your public IP; router port-forwards **WAN TCP 9111 → LAN host:9111**. Certs use **Let’s Encrypt DNS-01** via your DuckDNS token — **port 80 is not required**.
 
 From **`backend/`**:
 
 ```bash
-export METER_BUDDY_DOMAIN=meter.example.com
-export METER_BUDDY_AUTH_USER=meter-buddy
-export METER_BUDDY_AUTH_PASSWORD='your-strong-secret'
+cp .env.example .env
+# Edit .env:
+#   METER_BUDDY_DOMAIN=changeme.duckdns.org
+#   DUCKDNS_TOKEN=...          # from https://www.duckdns.org/
+#   METER_BUDDY_HTTPS_PORT=9111
+#   METER_BUDDY_AUTH_USER / METER_BUDDY_AUTH_PASSWORD
 docker compose up --build -d
 ```
 
+First `caddy` build compiles Caddy with the DuckDNS plugin (can take a few minutes).
+
 Compose starts:
 
-- **Caddy** on host ports 80/443 — automatic Let’s Encrypt certificate for `$METER_BUDDY_DOMAIN`, reverse-proxies to the backend
-- **backend** — internal only (no published `8000`); non-root image; `read_only` + dropped capabilities
+- **Caddy** — HTTPS on host `METER_BUDDY_HTTPS_PORT` (default 9111); ACME via DuckDNS DNS-01
+- **backend** — Compose network only; non-root; `read_only` + dropped capabilities
 
-The app refuses to start if `METER_BUDDY_AUTH_PASSWORD` is missing or still `change-me` (Compose does not set `METER_BUDDY_ALLOW_INSECURE_AUTH`).
+UI: `https://changeme.duckdns.org:9111/` (Basic Auth).  
+Upload: `https://changeme.duckdns.org:9111/api/meter-buddy/upload`.
 
-UI: `https://$METER_BUDDY_DOMAIN/` (Basic Auth). Upload: `https://$METER_BUDDY_DOMAIN/api/meter-buddy/upload`.
+There is no public HTTP redirect (port 80 not published). Always use `https://…:9111`.
 
 To run a pre-built image behind your own TLS proxy:
 
@@ -88,9 +98,9 @@ The Dockerfile does **not** bake auth credentials into the image.
 
 Leaf certificates renew automatically via Caddy. Firmware must pin the **ISRG roots**, not the leaf.
 
-1. Deploy Compose as above; confirm `https://$METER_BUDDY_DOMAIN/` prompts for Basic Auth.
+1. Deploy Compose as above; confirm `https://changeme.duckdns.org:9111/` prompts for Basic Auth.
 2. In `include/local_config.h` (from `config.example.h`):
-   - `UploadUrl = "https://<domain>/api/meter-buddy/upload"`
+   - `UploadUrl = "https://changeme.duckdns.org:9111/api/meter-buddy/upload"`
    - Matching `BasicAuthUser` / `BasicAuthPassword`
    - `#include "certs/isrg_roots.h"` and `TlsCaCert = IsrgRootCerts` (vendored X1 + X2)
    - `AllowInsecureTls = false`
@@ -113,7 +123,9 @@ Environment variables:
 - `METER_BUDDY_AUTH_PASSWORD` — required strong secret in production; default `change-me` only with `METER_BUDDY_ALLOW_INSECURE_AUTH=1`
 - `METER_BUDDY_ALLOW_INSECURE_AUTH` — `1` for local/tests only (never in Compose)
 - `METER_BUDDY_ENABLE_DOCS` — `1` to expose `/docs` / OpenAPI (off by default)
-- `METER_BUDDY_DOMAIN` — public hostname for Caddy Let’s Encrypt (Compose)
+- `METER_BUDDY_DOMAIN` — DuckDNS hostname (e.g. `changeme.duckdns.org`)
+- `DUCKDNS_TOKEN` — DuckDNS API token for Let’s Encrypt DNS-01
+- `METER_BUDDY_HTTPS_PORT` — host HTTPS port (default `9111`; router forwards this port)
 
 All HTTP routes and `/ws` require Basic Auth except `/healthz`.
 
@@ -137,7 +149,7 @@ curl -i \
       }
     ]
   }' \
-  https://meter.example.com/api/meter-buddy/upload
+  https://changeme.duckdns.org:9111/api/meter-buddy/upload
 ```
 
 ## Test

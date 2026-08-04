@@ -4,6 +4,10 @@ __pycache__/
 tests/
 requirements-dev.txt
 data/
+.env
+.env.*
+!.env.example
+Dockerfile.caddy
 .git/
 .gitignore
 Dockerfile
