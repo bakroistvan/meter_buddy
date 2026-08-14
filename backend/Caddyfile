@@ -19,5 +19,11 @@
 		dns duckdns {$DUCKDNS_TOKEN}
 		resolvers 1.1.1.1 8.8.8.8
 	}
-	reverse_proxy backend:8000
+	# OTA .bin downloads over a phone hotspot can exceed default proxy timeouts.
+	reverse_proxy backend:8000 {
+		transport http {
+			read_timeout 120s
+			write_timeout 120s
+		}
+	}
 }

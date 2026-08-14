@@ -640,7 +640,7 @@ void handleDiagnosticsBoot() {
 
   Serial.println(
       "Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], "
-      "f[ill] [N], upload, reboot, x[sleep]");
+      "f[ill] [N], upload, o[ta], reboot, x[sleep]");
   String cmd = "";
   static bool uploadWasLow = false;
   static bool rtcWasLow = false;
@@ -751,6 +751,21 @@ void handleDiagnosticsBoot() {
           } else if (first == 'u') {
             logEvent("upload triggered");
             handleUploadButton(true);
+          } else if (first == 'o') {
+            logEvent("ota triggered");
+#if defined(FIRMWARE_VERSION)
+            Serial.printf("ota: current=%s\n", FIRMWARE_VERSION);
+#else
+            Serial.printf("ota: current=%s\n", config::FirmwareVersion);
+#endif
+            if (!upload::ensureWifiConnected()) {
+              Serial.println("ota: wifi failed");
+            } else {
+              upload::checkFirmwareUpdate();
+              upload::disconnectWifiIfAllowed();
+              // HTTP_UPDATE_OK reboots inside HTTPUpdate; otherwise we return here.
+              Serial.println("ota: finished (no update or failed; success reboots)");
+            }
           } else if (first == 'r') {
             ESP.restart();
           } else if (first == 'x') {

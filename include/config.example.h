@@ -12,6 +12,8 @@ constexpr const char *WifiPassword = "change-me";
 
 constexpr const char *UploadUrl = "https://example.com/api/meter-buddy/upload";
 constexpr const char *FirmwareVersionUrl = "https://example.com/api/meter-buddy/firmware/version";
+// Fallback when PlatformIO pre-script did not inject FIRMWARE_VERSION (no git).
+// Tagged CI builds embed the git tag via script/pio_firmware_version.py.
 constexpr const char *FirmwareVersion = "1.0.0";
 constexpr const char *BasicAuthUser = "meter-buddy";
 constexpr const char *BasicAuthPassword = "change-me";
@@ -23,6 +25,7 @@ constexpr const char *TlsCaCert = IsrgRootCerts;
 constexpr bool AllowInsecureTls = false;
 constexpr uint32_t WifiConnectTimeoutMs = 30000;
 constexpr uint32_t HttpTimeoutMs = 20000;
+constexpr uint32_t OtaTimeoutMs = 120000;
 
 constexpr const char *NtpServer1 = "pool.ntp.org";
 constexpr const char *NtpServer2 = "time.google.com";

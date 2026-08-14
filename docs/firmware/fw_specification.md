@@ -44,7 +44,7 @@ Exit stay-awake is also via diagnostics serial command `x` (clears the flag and 
 ### US-6 — Stay-awake / diagnostics
 **Given** the flash stay-awake flag is set **or** a USB CDC host is open (`Serial.isPlugged() && Serial.isConnected()`),  
 **When** cold boot completes, a long-press **enable** path runs, or a short upload finishes while stay-awake applies,  
-**Then** the device stays awake with dim PWM status LED, pulse ISR attached, and a serial REPL. On entry, `handleDiagnosticsBoot()` prints a LittleFS hex dump (`storage::hexdump`), samples battery, then prints the help line (`Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], f[ill] [N], upload, reboot, x[sleep]`) and loops. Commands (first-letter match unless noted):
+**Then** the device stays awake with dim PWM status LED, pulse ISR attached, and a serial REPL. On entry, `handleDiagnosticsBoot()` prints a LittleFS hex dump (`storage::hexdump`), samples battery, then prints the help line (`Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], f[ill] [N], upload, o[ta], reboot, x[sleep]`) and loops. Commands (first-letter match unless noted):
 
 | Command | Action |
 | --- | --- |
@@ -55,6 +55,7 @@ Exit stay-awake is also via diagnostics serial command `x` (clears the flag and 
 | `s` / `status…` | Battery via `sample()` plus `adc_cal=<source> ok=<0/1>` (`calibrationSource` / `calibrationOk`), Wi‑Fi, live `awakePulseCount`, GPIO levels, UTC time, next RTC alarm; plus `storage_ok` (`storage::available()`), `unsynced`, `hot_pulses` (`currentPulses()`), `hot_start` (`currentPeriodStart()`), `awake_count` (typing `sleep` is **not** sleep — `s` runs `status`) |
 | `t` / `time` | Current UTC time (human format) |
 | `u` / `upload…` | Force upload (`handleUploadButton(true)`) |
+| `o` / `o[ta]…` | Print current firmware version (`ota: current=…` — `FIRMWARE_VERSION` when injected, else `config::FirmwareVersion`); connect Wi‑Fi via `upload::ensureWifiConnected`; on failure print `ota: wifi failed` and skip OTA; on success run `upload::checkFirmwareUpdate()` then `upload::disconnectWifiIfAllowed()`. Successful HTTPUpdate typically reboots inside the library; if control returns, print `ota: finished (no update or failed; success reboots)`. Same OTA mechanism as US-10 |
 | `r` / `reboot…` | `ESP.restart()` |
 | `x` | Clear stay-awake flag and `enterDeepSleep()` |
 
@@ -86,6 +87,8 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 **Given** an upload succeeded and at least one reading was marked synced,  
 **When** post-upload housekeeping runs,  
 **Then** `upload::checkFirmwareUpdate()` is invoked while the upload wake’s Wi‑Fi session is still up; `disconnectWifiIfAllowed` runs afterward (unless `KeepWifiConnectedWhenAwake`). The check no-ops only if Wi‑Fi is already disconnected (e.g. connect failed earlier, or the radio dropped and was not restored).
+
+OTA uses Arduino `HTTPUpdate` against `config::FirmwareVersionUrl` (`GET /api/meter-buddy/firmware/version` — **not** a JSON document; see [api/firmware.md](../api/firmware.md)). The client sends HTTP Basic Auth (`BasicAuthUser` / `BasicAuthPassword`), sets timeout `OtaTimeoutMs` (default 120000), and reports the current version as `FIRMWARE_VERSION` when the PlatformIO pre-script [`script/pio_firmware_version.py`](../../script/pio_firmware_version.py) injected it, otherwise `config::FirmwareVersion`. TLS trust matches upload (`TlsCaCert` / `AllowInsecureTls`). The same `checkFirmwareUpdate()` path is also reachable from diagnostics via `o` / `o[ta]` (US-6), which opens its own Wi‑Fi session. USB flashing remains the primary install path.
 
 ---
 
@@ -142,7 +145,11 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 | `StayAwakeBoot` | false | Compile-time default for stay-awake cache before/without flash file |
 | `EnableSerialLogs` | true | Serial logging |
 | `UploadUrl` | `https://…/api/meter-buddy/upload` | Full HTTPS upload endpoint |
-| `BasicAuthUser` / `BasicAuthPassword` | `meter-buddy` / `change-me` | Must match backend `METER_BUDDY_AUTH_*` |
+| `FirmwareVersionUrl` | `https://…/api/meter-buddy/firmware/version` | Arduino `HTTPUpdate` URL (octet-stream / 304 / 503 — not JSON) |
+| `FirmwareVersion` | `1.0.0` | Fallback current version when `FIRMWARE_VERSION` was not injected at build |
+| `OtaTimeoutMs` | 120000 | `HTTPUpdate` timeout (ms); large enough for `.bin` over slow hotspots |
+| `HttpTimeoutMs` | 20000 | Upload POST timeout (ms) |
+| `BasicAuthUser` / `BasicAuthPassword` | `meter-buddy` / `change-me` | Must match backend `METER_BUDDY_AUTH_*` (upload and OTA) |
 | `TlsCaCert` | `IsrgRootCerts` | Vendored ISRG Root X1 + X2 PEM (`include/certs/isrg_roots.h`); trust Let’s Encrypt server certs without pinning the rotating leaf |
 | `AllowInsecureTls` | false | When false and `TlsCaCert` non-empty, `WiFiClientSecure` verifies the server; production must leave this false |
 
@@ -392,7 +399,7 @@ Deep-sleep wakes are **single-shot**, not nested. Concurrent GPIO assertions col
 4. `upload::ensureWifiConnected()` once. On failure, mark the wake failed and skip POSTs/NTP. On success, `upload::syncRtcFromNetwork()` once (best-effort — failure does not abort the wake).
 5. Loop: `loadUploadBatch` → `upload::sendBatch(batch, includeBattery ? &reading : nullptr)` (`buildBody` + HTTPS/HTTP POST only; may call `ensureWifiConnected` again if the link dropped; no NTP; no disconnect). `includeBattery` starts true so the first POST of the session gets top-level `battery_v` / `battery_pct_est`; then set false so follow-up truncated batches omit those keys. On Success with `count > 0` → `markSyncedThrough`; continue while `truncated`; stop on empty/non-truncated or failure.
 6. `flushAwakePulses(true)` again so pulses counted during Wi‑Fi/upload enter the **new** open period (not the batch just posted); detach ISR if this path attached it.
-7. Success + had readings → optional OTA check via `upload::checkFirmwareUpdate()` while Wi‑Fi is still up; failure → `rapidErrorBlink`. Then `upload::disconnectWifiIfAllowed()` (skipped when `KeepWifiConnectedWhenAwake`); restore dim awake LED. USB flashing remains a valid primary install path.
+7. Success + had readings → optional OTA check via `upload::checkFirmwareUpdate()` while Wi‑Fi is still up (Basic Auth + `OtaTimeoutMs`; version from `FIRMWARE_VERSION` or `FirmwareVersion`; wire contract [api/firmware.md](../api/firmware.md)); failure → `rapidErrorBlink`. Then `upload::disconnectWifiIfAllowed()` (skipped when `KeepWifiConnectedWhenAwake`); restore dim awake LED. USB flashing remains a valid primary install path.
 
 ### Sync cursor and compaction
 
@@ -405,7 +412,7 @@ Empty successful heartbeats (`batch.count == 0`) do **not** call `markSyncedThro
 
 ### TLS and server trust
 
-Upload POSTs use `WiFiClientSecure` with HTTP Basic Auth (`BasicAuthUser` / `BasicAuthPassword`). Unless `AllowInsecureTls` is true, a non-empty `TlsCaCert` is passed to `setCACert` (default `IsrgRootCerts` — ISRG Root X1 + X2). Pin the public CA roots, not the server’s short-lived Let’s Encrypt leaf, so Caddy/automatic renewals on the backend do not require reflashing devices.
+Upload POSTs and OTA `HTTPUpdate` use `WiFiClientSecure` with HTTP Basic Auth (`BasicAuthUser` / `BasicAuthPassword`). Unless `AllowInsecureTls` is true, a non-empty `TlsCaCert` is passed to `setCACert` (default `IsrgRootCerts` — ISRG Root X1 + X2). Pin the public CA roots, not the server’s short-lived Let’s Encrypt leaf, so Caddy/automatic renewals on the backend do not require reflashing devices.
 
 ### Batch / error payload
 

@@ -16,10 +16,11 @@ These two documents are normative for product requirements and firmware behavior
 | Doc | Description |
 | --- | --- |
 | [api/upload.md](api/upload.md) | Firmware ↔ backend upload contract |
+| [api/firmware.md](api/firmware.md) | Firmware ↔ backend OTA / HTTPUpdate contract + mirror operator routes |
 | [hardware/schematic.md](hardware/schematic.md) | Module schematic, nets, BOM, EasyEDA import notes |
 | [hardware/meter_buddy.netlist.json](hardware/meter_buddy.netlist.json) | EasyEDA Pro netlist-rebuild import |
 
-Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md) and [api/upload.md](api/upload.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md) and [hardware/schematic.md](hardware/schematic.md).
+Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md), [api/upload.md](api/upload.md), and [api/firmware.md](api/firmware.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md) and [hardware/schematic.md](hardware/schematic.md).
 
 ## Package READMEs
 

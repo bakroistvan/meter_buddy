@@ -5,16 +5,28 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import routes_db, routes_dumps, routes_pages, routes_upload, routes_ws
+from app.api import (
+    routes_db,
+    routes_dumps,
+    routes_firmware,
+    routes_pages,
+    routes_upload,
+    routes_ws,
+)
 from app.core.auth import validate_auth_config
 from app.db import init_db
+from app.services.firmware_mirror import mirror
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_auth_config()
     init_db()
-    yield
+    mirror.start_background_sync()
+    try:
+        yield
+    finally:
+        mirror.stop_background_sync()
 
 
 _enable_docs = os.getenv("METER_BUDDY_ENABLE_DOCS", "").strip().lower() in {
@@ -40,6 +52,7 @@ def healthz() -> dict[str, bool]:
 
 app.include_router(routes_pages.router)
 app.include_router(routes_upload.router)
+app.include_router(routes_firmware.router)
 app.include_router(routes_dumps.router)
 app.include_router(routes_db.router)
 app.include_router(routes_ws.router)
