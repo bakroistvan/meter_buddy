@@ -38,7 +38,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | --- | --- |
 | M-1 | Pulses are proportional to energy; the meter’s impulses-per-kWh is a configured property of the installation. |
 | M-2 | Pulses accumulate into fixed-length time windows (period length is a product parameter; currently one minute). |
-| M-3 | At the end of each window with activity, one record exists: time, pulse count, and battery condition. |
+| M-3 | At the end of each window with activity, one record exists: time, pulse count, and battery condition. Upload of that record includes the stored battery condition. |
 | M-4 | Sub-period resolution is not required; one record per window is sufficient. |
 | M-5 | Short isolated pulses must be recorded with minimal awake time. |
 | M-6 | When pulses arrive in rapid succession, the device must still count them accurately (including while briefly staying awake), then return to sleep when the meter is quiet again. |

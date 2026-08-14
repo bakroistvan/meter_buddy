@@ -72,7 +72,7 @@ bool disconnectWifiIfAllowed() {
 
 String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   String body;
-  body.reserve(512 + batch.count * 100 + batch.errorCount * 80);
+  body.reserve(512 + batch.count * 140 + batch.errorCount * 80);
   body += "{\"device_id\":\"";
   body += config::DeviceId;
   body += "\",\"meter_impulses_per_kwh\":";
@@ -92,12 +92,17 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading *batt
       body += ',';
     }
     const uint32_t periodEnd = record.periodStart + config::RtcWakeIntervalSeconds;
+    const float volts = record.batteryMv / 1000.0f;
     body += "{\"timestamp\":\"";
     body += iso8601(periodEnd);
     body += "\",\"period_start\":\"";
     body += iso8601(record.periodStart);
     body += "\",\"pulses\":";
     body += String(record.pulses);
+    body += ",\"battery_v\":";
+    body += String(volts, 3);
+    body += ",\"battery_pct_est\":";
+    body += String(battery::estimatePercent(volts));
     body += "}";
   }
 

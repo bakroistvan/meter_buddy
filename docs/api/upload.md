@@ -31,7 +31,9 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
     {
       "timestamp": "2026-05-01T13:00:00Z",
       "period_start": "2026-05-01T12:00:00Z",
-      "pulses": 42
+      "pulses": 42,
+      "battery_v": 3.870,
+      "battery_pct_est": 62
     }
   ],
   "errors": [
@@ -58,8 +60,8 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `timestamp` | ISO-8601 datetime | yes | Period end (UTC `Z` from firmware) |
 | `period_start` | ISO-8601 datetime \| null | no | Period start |
 | `pulses` | int | yes | `>= 0` |
-| `battery_v` | float \| null | no | Accepted by the backend if present; current firmware does **not** emit per-reading battery (roll-time mV stays in local `ReadingRecord.batteryMv` only) |
-| `battery_pct_est` | int \| null | no | Accepted by the backend if present; current firmware does **not** emit this key on readings |
+| `battery_v` | float \| null | no | Volts from stored `ReadingRecord.batteryMv / 1000`; firmware always emits this on each reading, serialized with **3 decimal places** (`String(volts, 3)`). Backend still accepts omitted keys (clients that omit them stay omitted) |
+| `battery_pct_est` | int \| null | no | 0–100 estimate recomputed via `battery::estimatePercent` from that same voltage; percent is **not** stored on disk. Firmware always emits this on each reading |
 
 ### Error object
 
@@ -131,6 +133,6 @@ Set in `include/local_config.h` (or example defaults):
 
 ## Firmware body builder
 
-`upload::buildBody(batch, batteryReading)` / `sendBatch(batch, batteryReading)` in `include/upload.h` / `src/upload.cpp` take `const battery::Reading*`. When non-null, top-level `battery_v` / `battery_pct_est` are emitted (`battery_v` via `String(volts, 3)` — three decimal places); when `nullptr`, those keys are omitted. Readings serialize as `timestamp` / `period_start` / `pulses` only.
+`upload::buildBody(batch, batteryReading)` / `sendBatch(batch, batteryReading)` in `include/upload.h` / `src/upload.cpp` take `const battery::Reading*`. When non-null, top-level `battery_v` / `battery_pct_est` are emitted (`battery_v` via `String(volts, 3)` — three decimal places); when `nullptr`, those keys are omitted. Readings serialize as `timestamp` / `period_start` / `pulses` / `battery_v` / `battery_pct_est` (`battery_v` from `record.batteryMv / 1000.0f` at 3 decimal places; `battery_pct_est` from `battery::estimatePercent` of that voltage).
 
 On a real upload wake, firmware calls `sampleForRecord()` once, uses that mV for `rollCurrentPeriod`, and passes `&reading` only to the first `sendBatch` of the session (`includeBattery`); follow-up truncated batches pass `nullptr`. The diagnostics REPL command `d` / `dump…` also uses `buildBody`, with `battery::sample()` passed for top-level fields — same encoder, without forcing Wi‑Fi off / settle, and without rolling or opening the network.

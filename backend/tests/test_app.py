@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 import importlib
-import os
+import sqlite3
 
 import pytest
 
@@ -289,6 +289,61 @@ def test_upload_omits_battery_fields(tmp_path, monkeypatch):
         dumps = client.get("/dumps", headers=auth_header()).json()
         assert dumps[0]["battery_v"] is None
         assert dumps[0]["battery_pct_est"] is None
+
+
+def test_upload_persists_per_reading_battery(tmp_path, monkeypatch):
+    db_file = tmp_path / "meter_buddy.sqlite3"
+    monkeypatch.setenv("METER_BUDDY_DB_PATH", str(db_file))
+    monkeypatch.setenv("METER_BUDDY_AUTH_USER", "meter-buddy")
+    monkeypatch.setenv("METER_BUDDY_AUTH_PASSWORD", "change-me")
+
+    import app.main
+
+    importlib.reload(app.main)
+
+    with TestClient(app.main.app) as client:
+        payload = {
+            "device_id": "meter-buddy-001",
+            "meter_impulses_per_kwh": 1000,
+            "upload_trigger": "button",
+            "battery_v": 3.910,
+            "battery_pct_est": 65,
+            "readings": [
+                {
+                    "timestamp": "2026-05-01T13:00:00Z",
+                    "period_start": "2026-05-01T12:59:00Z",
+                    "pulses": 42,
+                    "battery_v": 3.870,
+                    "battery_pct_est": 62,
+                }
+            ],
+        }
+
+        response = client.post(
+            "/api/meter-buddy/upload",
+            headers=auth_header(),
+            json=payload,
+        )
+        assert response.status_code == 201
+        assert response.json() == {"ok": True, "dump_id": 1, "stored_readings": 1}
+
+        dump = client.get("/dumps/1.json", headers=auth_header())
+        assert dump.status_code == 200
+        body = dump.json()
+        assert body["battery_v"] == 3.91
+        assert body["battery_pct_est"] == 65
+        assert body["readings"][0]["battery_v"] == 3.87
+        assert body["readings"][0]["battery_pct_est"] == 62
+
+    with sqlite3.connect(db_file) as conn:
+        row = conn.execute(
+            """
+            SELECT battery_v, battery_pct_est
+            FROM meter_readings
+            WHERE dump_id = 1
+            """
+        ).fetchone()
+        assert row == (3.87, 62)
 
 
 def test_protected_routes_require_auth(tmp_path, monkeypatch):
