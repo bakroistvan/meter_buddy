@@ -44,13 +44,14 @@ Exit stay-awake is also via diagnostics serial command `x` (clears the flag and 
 ### US-6 — Stay-awake / diagnostics
 **Given** the flash stay-awake flag is set **or** a USB CDC host is open (`Serial.isPlugged() && Serial.isConnected()`),  
 **When** cold boot completes, a long-press **enable** path runs, or a short upload finishes while stay-awake applies,  
-**Then** the device stays awake with dim PWM status LED, pulse ISR attached, and a serial REPL. On entry, `handleDiagnosticsBoot()` prints a LittleFS hex dump (`storage::hexdump`), samples battery, then prints the help line and loops. Commands (first-letter match unless noted):
+**Then** the device stays awake with dim PWM status LED, pulse ISR attached, and a serial REPL. On entry, `handleDiagnosticsBoot()` prints a LittleFS hex dump (`storage::hexdump`), samples battery, then prints the help line (`Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], f[ill] [N], upload, reboot, x[sleep]`) and loops. Commands (first-letter match unless noted):
 
 | Command | Action |
 | --- | --- |
 | `d` / `dump…` | Print open-hot summary (`storage_ok`, `hot_pulses`, `hot_start`) and a note that JSON `readings` are rolled LittleFS only (open hot is not included until RTC roll or upload); then `loadUploadBatch` → print `upload::buildBody(batch, &reading)` with `battery::sample()` — same encoder as `sendBatch`, passing the sample so top-level battery keys are present (immediate `sample()`, does **not** force Wi‑Fi off / settle; no roll, no network). Readings in the preview are `timestamp` / `period_start` / `pulses` only |
 | `h` / `hexdump…` | `storage::hexdump` — hex of `/records.bin`, `/sync.dat`, `/stay_awake.dat` |
 | `c` / `clear…` | `storage::clear()` |
+| `f` / `fill [N]` | Append synthetic rolled LittleFS records for testing (`fillSyntheticRecords`). Default `N=100`; optional count capped at 500; `N<=0` prints `usage: f[ill] [N]  (default 100, max 500)` and does not fill. Flushes awake pulses (`flushAwakePulses(true)`), samples battery via `sample()` for record mV, rolls any open hot period if pulses &gt; 0, zero-pulse-rolls to align `periodStart` to `now - N * RtcWakeIntervalSeconds` (or `0` if that underflows), then for each of `N` periods: random pulses in `1..100`, `addPulses`, `rollCurrentPeriod` spaced by `RtcWakeIntervalSeconds` ending just before now. Prints `filled N records` on success, or `fill failed: …` / `fill failed after K records` on storage/roll failure |
 | `s` / `status…` | Battery via `sample()` plus `adc_cal=<source> ok=<0/1>` (`calibrationSource` / `calibrationOk`), Wi‑Fi, live `awakePulseCount`, GPIO levels, UTC time, next RTC alarm; plus `storage_ok` (`storage::available()`), `unsynced`, `hot_pulses` (`currentPulses()`), `hot_start` (`currentPeriodStart()`), `awake_count` (typing `sleep` is **not** sleep — `s` runs `status`) |
 | `t` / `time` | Current UTC time (human format) |
 | `u` / `upload…` | Force upload (`handleUploadButton(true)`) |

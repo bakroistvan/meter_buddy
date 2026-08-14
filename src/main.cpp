@@ -592,13 +592,55 @@ void dumpUploadJson() {
   Serial.println(upload::buildBody(batch, &reading));
 }
 
+void fillSyntheticRecords(uint32_t count) {
+  if (!storage::available()) {
+    Serial.println("fill failed: storage unavailable");
+    return;
+  }
+
+  flushAwakePulses(true);
+
+  const auto reading = battery::sample();
+  const uint16_t batteryMv = static_cast<uint16_t>(reading.volts * 1000.0f);
+  const uint32_t now = currentTimestamp();
+  if (storage::currentPulses() > 0) {
+    if (!storage::rollCurrentPeriod(now, batteryMv)) {
+      Serial.println("fill failed: could not roll open period");
+      return;
+    }
+  }
+
+  const uint32_t interval = config::RtcWakeIntervalSeconds;
+  const uint32_t base = now > (count * interval) ? now - (count * interval) : 0;
+  // Zero-pulse roll sets hot periodStart to base without appending.
+  if (!storage::rollCurrentPeriod(base, batteryMv)) {
+    Serial.println("fill failed: could not align period start");
+    return;
+  }
+
+  uint32_t filled = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    const uint16_t pulses = static_cast<uint16_t>(random(1, 101));
+    storage::addPulses(base + i * interval, pulses);
+    if (!storage::rollCurrentPeriod(base + (i + 1) * interval, batteryMv)) {
+      Serial.printf("fill failed after %lu records\n",
+                    static_cast<unsigned long>(filled));
+      return;
+    }
+    ++filled;
+  }
+  Serial.printf("filled %lu records\n", static_cast<unsigned long>(filled));
+}
+
 void handleDiagnosticsBoot() {
   logEvent("diagnostics boot");
   storage::hexdump(Serial);
   const auto reading = battery::sample();
   Serial.printf("battery=%.3fV pct=%u\n", reading.volts, reading.percent);
 
-  Serial.println("Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], upload, reboot, x[sleep]");
+  Serial.println(
+      "Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], "
+      "f[ill] [N], upload, reboot, x[sleep]");
   String cmd = "";
   static bool uploadWasLow = false;
   static bool rtcWasLow = false;
@@ -650,6 +692,20 @@ void handleDiagnosticsBoot() {
           } else if (first == 'c') {
             storage::clear();
             Serial.println("storage cleared");
+          } else if (first == 'f') {
+            uint32_t count = 100;
+            const int space = cmd.indexOf(' ');
+            if (space > 0) {
+              const long parsed = cmd.substring(space + 1).toInt();
+              if (parsed <= 0) {
+                Serial.println("usage: f[ill] [N]  (default 100, max 500)");
+              } else {
+                count = parsed > 500 ? 500 : static_cast<uint32_t>(parsed);
+                fillSyntheticRecords(count);
+              }
+            } else {
+              fillSyntheticRecords(count);
+            }
           } else if (first == 's') {
             const auto r = battery::sample();
             const bool pulseLow = digitalRead(pins::PulseWakePin) == LOW;
