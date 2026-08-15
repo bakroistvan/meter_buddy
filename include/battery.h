@@ -26,4 +26,13 @@ Reading sampleForRecord();
 
 uint8_t estimatePercent(float volts);
 
+// If last reset was brown-out, latch protection lock (LittleFS) even if V bounced.
+void noteResetReason();
+
+// Apply block/unlock hysteresis vs USB. Returns true when protection remains/latches.
+bool evaluateProtectionLock(float volts, bool usbPowered);
+
+// Thin wrapper over storage::protectionLocked().
+bool protectionLocked();
+
 } // namespace battery

@@ -79,10 +79,10 @@ Stable `code` values from firmware:
 | `crc_mismatch` | Bad CRC while scanning `/records.bin` (`detail` includes offset) |
 | `storage_unavailable` | LittleFS/storage not ready |
 | `batch_truncated` | More unsynced records than one upload batch |
+| `low_battery` | Protection lock was latched because pack voltage was below `BatteryRadioBlockVolts` (firmware message: `protection lock from low battery`). Pending in `/brownout.dat` until attached on a POST that receives HTTP 200/201 |
+| `brownout_lock` | Protection lock was latched because last reset was `ESP_RST_BROWNOUT` (firmware message: `protection lock from brown-out reset`). Same pending/clear lifecycle as `low_battery`; both may appear together |
 
 Errors are stored in the dump `raw_json` (no dedicated SQL table in v1).
-
-## Success response
 
 ```json
 {

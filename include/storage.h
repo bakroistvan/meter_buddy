@@ -42,6 +42,15 @@ bool markSyncedThrough(uint32_t sequence);
 uint32_t unsyncedCount();
 bool stayAwakeBoot();
 bool setStayAwakeBoot(bool enabled);
+
+// Button-only protection sleep (brown-out / low battery). Survives power loss.
+bool protectionLocked();
+bool setProtectionLocked(bool locked);
+void markProtectionPendingBrownout();
+void markProtectionPendingLowBattery();
+void attachPendingProtectionErrors(UploadBatch &batch);
+void clearPendingProtectionErrors();
+
 void hexdump(Stream &stream);
 void clear();
 

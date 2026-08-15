@@ -18,10 +18,20 @@ RTC_DATA_ATTR uint16_t rtcCurrentPulses = 0;
 uint32_t nextSequence = 1;
 uint32_t syncedThrough = 0;
 bool stayAwakeBootCached = config::StayAwakeBoot;
+bool protectionLockedCached = false;
+bool pendingBrownoutError = false;
+bool pendingLowBatteryError = false;
 
 const char *RecordsFile = "/records.bin";
 const char *SyncFile = "/sync.dat";
 const char *StayAwakeFile = "/stay_awake.dat";
+const char *ProtectionFile = "/brownout.dat";
+
+struct __attribute__((packed)) ProtectionFileState {
+  uint8_t locked;
+  uint8_t pendingBrownout;
+  uint8_t pendingLowBattery;
+};
 
 uint16_t crc16(const uint8_t *data, size_t len) {
   uint16_t crc = 0xFFFF;
@@ -81,6 +91,42 @@ bool saveStayAwakeState() {
   }
   const uint8_t value = stayAwakeBootCached ? 1 : 0;
   const bool ok = file.write(&value, 1) == 1;
+  file.close();
+  return ok;
+}
+
+void loadProtectionState() {
+  protectionLockedCached = false;
+  pendingBrownoutError = false;
+  pendingLowBatteryError = false;
+  File file = LittleFS.open(ProtectionFile, FILE_READ);
+  if (!file) {
+    return;
+  }
+  ProtectionFileState state{};
+  if (file.read(reinterpret_cast<uint8_t *>(&state), sizeof(state)) == sizeof(state)) {
+    protectionLockedCached = state.locked != 0;
+    pendingBrownoutError = state.pendingBrownout != 0;
+    pendingLowBatteryError = state.pendingLowBattery != 0;
+  }
+  file.close();
+}
+
+bool saveProtectionState() {
+  if (!initialized) {
+    return false;
+  }
+  File file = LittleFS.open(ProtectionFile, FILE_WRITE);
+  if (!file) {
+    return false;
+  }
+  ProtectionFileState state{
+      static_cast<uint8_t>(protectionLockedCached ? 1 : 0),
+      static_cast<uint8_t>(pendingBrownoutError ? 1 : 0),
+      static_cast<uint8_t>(pendingLowBatteryError ? 1 : 0),
+  };
+  const bool ok =
+      file.write(reinterpret_cast<const uint8_t *>(&state), sizeof(state)) == sizeof(state);
   file.close();
   return ok;
 }
@@ -231,6 +277,7 @@ bool begin() {
   loadNextSequence();
   repairSyncState();
   loadStayAwakeState();
+  loadProtectionState();
   return true;
 }
 
@@ -385,6 +432,56 @@ bool setStayAwakeBoot(bool enabled) {
   return saveStayAwakeState();
 }
 
+bool protectionLocked() {
+  return protectionLockedCached;
+}
+
+bool setProtectionLocked(bool locked) {
+  protectionLockedCached = locked;
+  if (!initialized) {
+    return false;
+  }
+  return saveProtectionState();
+}
+
+void markProtectionPendingBrownout() {
+  pendingBrownoutError = true;
+  if (initialized) {
+    saveProtectionState();
+  }
+}
+
+void markProtectionPendingLowBattery() {
+  pendingLowBatteryError = true;
+  if (initialized) {
+    saveProtectionState();
+  }
+}
+
+void attachPendingProtectionErrors(UploadBatch &batch) {
+  if (pendingBrownoutError && batch.errorCount < MaxUploadErrors) {
+    batch.errors[batch.errorCount].code = "brownout_lock";
+    batch.errors[batch.errorCount].detail[0] = '\0';
+    ++batch.errorCount;
+  }
+  if (pendingLowBatteryError && batch.errorCount < MaxUploadErrors) {
+    batch.errors[batch.errorCount].code = "low_battery";
+    batch.errors[batch.errorCount].detail[0] = '\0';
+    ++batch.errorCount;
+  }
+}
+
+void clearPendingProtectionErrors() {
+  if (!pendingBrownoutError && !pendingLowBatteryError) {
+    return;
+  }
+  pendingBrownoutError = false;
+  pendingLowBatteryError = false;
+  if (initialized) {
+    saveProtectionState();
+  }
+}
+
 void hexdump(Stream &stream) {
   if (!initialized) {
     stream.println("storage unavailable");
@@ -393,6 +490,7 @@ void hexdump(Stream &stream) {
   hexdumpFile(stream, RecordsFile);
   hexdumpFile(stream, SyncFile);
   hexdumpFile(stream, StayAwakeFile);
+  hexdumpFile(stream, ProtectionFile);
 }
 
 void clear() {
@@ -400,6 +498,9 @@ void clear() {
     nextSequence = 1;
     syncedThrough = 0;
     stayAwakeBootCached = config::StayAwakeBoot;
+    protectionLockedCached = false;
+    pendingBrownoutError = false;
+    pendingLowBatteryError = false;
     rtcCurrentPeriodStart = 0;
     rtcCurrentPulses = 0;
     return;
@@ -407,10 +508,14 @@ void clear() {
   LittleFS.remove(RecordsFile);
   LittleFS.remove(SyncFile);
   LittleFS.remove(StayAwakeFile);
+  LittleFS.remove(ProtectionFile);
   LittleFS.remove("/tmp_records.bin");
   nextSequence = 1;
   syncedThrough = 0;
   stayAwakeBootCached = config::StayAwakeBoot;
+  protectionLockedCached = false;
+  pendingBrownoutError = false;
+  pendingLowBatteryError = false;
   rtcCurrentPeriodStart = 0;
   rtcCurrentPulses = 0;
 }

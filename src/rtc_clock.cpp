@@ -53,6 +53,17 @@ bool clearAlarm() {
   return true;
 }
 
+bool disableWakeAlarm() {
+  if (!initialized) {
+    return false;
+  }
+  rtc.clearAlarm(1);
+  rtc.clearAlarm(2);
+  rtc.disableAlarm(1);
+  rtc.disableAlarm(2);
+  return true;
+}
+
 bool scheduleNextWakeAlarm() {
   if (!initialized) {
     return false;

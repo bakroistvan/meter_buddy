@@ -1,12 +1,14 @@
 #include "battery.h"
 
 #include <WiFi.h>
+#include <esp_system.h>
 
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 
 #include "config.h"
 #include "pins.h"
+#include "storage.h"
 
 namespace battery {
 
@@ -183,6 +185,57 @@ uint8_t estimatePercent(float volts) {
     }
   }
   return 0;
+}
+
+void noteResetReason() {
+  if (esp_reset_reason() != ESP_RST_BROWNOUT) {
+    return;
+  }
+  storage::setProtectionLocked(true);
+  storage::markProtectionPendingBrownout();
+  if (config::EnableSerialLogs) {
+    Serial.println("protection: latched from ESP_RST_BROWNOUT");
+  }
+}
+
+bool evaluateProtectionLock(float volts, bool usbPowered) {
+  if (usbPowered) {
+    if (storage::protectionLocked()) {
+      storage::setProtectionLocked(false);
+      if (config::EnableSerialLogs) {
+        Serial.println("protection: cleared (USB powered)");
+      }
+    }
+    return false;
+  }
+
+  if (storage::protectionLocked()) {
+    if (volts >= config::BatteryRadioUnlockVolts) {
+      storage::setProtectionLocked(false);
+      if (config::EnableSerialLogs) {
+        Serial.printf("protection: cleared V=%.3f >= unlock %.3f\n",
+                      volts, config::BatteryRadioUnlockVolts);
+      }
+      return false;
+    }
+    return true;
+  }
+
+  if (volts < config::BatteryRadioBlockVolts) {
+    storage::setProtectionLocked(true);
+    storage::markProtectionPendingLowBattery();
+    if (config::EnableSerialLogs) {
+      Serial.printf("protection: latched low battery V=%.3f < block %.3f\n",
+                    volts, config::BatteryRadioBlockVolts);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+bool protectionLocked() {
+  return storage::protectionLocked();
 }
 
 } // namespace battery
