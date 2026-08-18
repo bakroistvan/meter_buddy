@@ -43,6 +43,11 @@ constexpr uint16_t RtcWakeIntervalSeconds = 60;
 // Pause after forcing Wi-Fi off before ADC sample used for RTC roll / upload.
 constexpr uint32_t BatteryAdcSettleMs = 80;
 
+// Pack voltage thresholds for button-only protection sleep (hysteresis).
+// Below block → latch lock; clear only at/above unlock (or USB powered).
+constexpr float BatteryRadioBlockVolts = 3.30f;
+constexpr float BatteryRadioUnlockVolts = 3.50f;
+
 constexpr bool EnableDeepSleep = true;
 constexpr bool KeepWifiConnectedWhenAwake = false;
 constexpr bool StayAwakeBoot = false;

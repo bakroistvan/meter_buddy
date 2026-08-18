@@ -37,6 +37,12 @@ String errorMessage(const char *code) {
   if (strcmp(code, "batch_truncated") == 0) {
     return "upload batch truncated";
   }
+  if (strcmp(code, "low_battery") == 0) {
+    return "protection lock from low battery";
+  }
+  if (strcmp(code, "brownout_lock") == 0) {
+    return "protection lock from brown-out reset";
+  }
   return code != nullptr ? String(code) : String("unknown");
 }
 

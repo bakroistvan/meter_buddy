@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 #include <esp_ota_ops.h>
 #include <WiFi.h>
 #include <freertos/FreeRTOS.h>
@@ -90,7 +91,16 @@ bool debugHostConnected() {
   return serialStarted && Serial.isPlugged() && Serial.isConnected();
 }
 
+bool usbPowered() {
+  // USB VBUS present (CDC plugged). Wall chargers without a host still unlock
+  // via BatteryRadioUnlockVolts hysteresis.
+  return Serial.isPlugged();
+}
+
 bool shouldStayAwake() {
+  if (storage::protectionLocked() && !usbPowered()) {
+    return false;
+  }
   return debugHostConnected() || storage::stayAwakeBoot();
 }
 
@@ -208,13 +218,15 @@ void waitForUploadButtonRelease() {
 void enterDeepSleep() {
   if (!config::EnableDeepSleep) {
     logEvent("deep sleep disabled: staying awake");
-    if (config::KeepWifiConnectedWhenAwake) {
+    if (config::KeepWifiConnectedWhenAwake && !storage::protectionLocked()) {
       upload::ensureWifiConnected();
     }
     return;
   }
 
-  logEvent("entering deep sleep");
+  const bool protection = storage::protectionLocked();
+  logEvent(protection ? "entering deep sleep (button-only protection)"
+                      : "entering deep sleep");
   if (pulseLedOffTimer != nullptr) {
     xTimerStop(pulseLedOffTimer, 0);
   }
@@ -223,9 +235,9 @@ void enterDeepSleep() {
   awakeLed.setSleep();
   WiFi.mode(WIFI_OFF);
 
-  // Wait for pulse pin to go HIGH so we don't immediately re-wake and
-  // double-count the same pulse (GPIO wakeup is level-triggered on ESP32-C3).
-  {
+  if (!protection) {
+    // Wait for pulse pin to go HIGH so we don't immediately re-wake and
+    // double-count the same pulse (GPIO wakeup is level-triggered on ESP32-C3).
     const uint32_t settleStart = millis();
     while (digitalRead(pins::PulseWakePin) == LOW &&
            millis() - settleStart < config::PulseDebounceMs * 4) {
@@ -235,16 +247,24 @@ void enterDeepSleep() {
 
   waitForUploadButtonRelease();
 
-  // Only GPIOs 0-5 support deep sleep wakeup on ESP32-C3. The upload button
-  // on D1/GPIO3 is now included so a button press can wake the device.
+  // Only GPIOs 0-5 support deep sleep wakeup on ESP32-C3.
   esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::UploadButtonPin, ESP_GPIO_WAKEUP_GPIO_LOW);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::RtcWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
-  esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::PulseWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  if (!protection) {
+    esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::RtcWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
+    esp_deep_sleep_enable_gpio_wakeup(1ULL << pins::PulseWakePin, ESP_GPIO_WAKEUP_GPIO_LOW);
+  }
 
   if (config::EnableSerialLogs) {
     Serial.flush();
   }
   esp_deep_sleep_start();
+}
+
+void enterProtectionSleep() {
+  if (rtcClockAvailable) {
+    rtc_clock::disableWakeAlarm();
+  }
+  enterDeepSleep();
 }
 
 bool uploadButtonPressed() {
@@ -389,6 +409,11 @@ void handleRtcWake(uint32_t timestamp) {
           formatUtcTimestamp(timestamp).c_str());
     }
   }
+
+  if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
+    rtc_clock::disableWakeAlarm();
+    return;
+  }
   rtc_clock::scheduleNextWakeAlarm();
 }
 
@@ -414,6 +439,16 @@ void handleUploadWake(bool force = false) {
   logEvent("post-roll");
   storage::hexdump(Serial);
 
+  if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
+    logEvent("upload blocked: protection lock");
+    flushAwakePulses(true);
+    if (!pulseInterruptWasAttached) detachAwakePulseInterrupt();
+    awakeLed.rapidErrorBlink();
+    upload::disconnectWifiIfAllowed();
+    awakeLed.setAwake();
+    return;
+  }
+
   bool includeBattery = true;
   bool uploadSucceeded = true;
   bool uploadedRecords = false;
@@ -430,6 +465,7 @@ void handleUploadWake(bool force = false) {
         uploadSucceeded = false;
         break;
       }
+      storage::attachPendingProtectionErrors(batch);
 
       if (config::EnableSerialLogs) {
         if (includeBattery) {
@@ -450,6 +486,7 @@ void handleUploadWake(bool force = false) {
         uploadSucceeded = false;
         break;
       }
+      storage::clearPendingProtectionErrors();
       if (batch.count > 0) {
         uploadedRecords = true;
         storage::markSyncedThrough(batch.newestSequence);
@@ -637,6 +674,11 @@ void handleDiagnosticsBoot() {
   storage::hexdump(Serial);
   const auto reading = battery::sample();
   Serial.printf("battery=%.3fV pct=%u\n", reading.volts, reading.percent);
+  if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
+    logEvent("diagnostics: protection lock — button-only sleep");
+    enterProtectionSleep();
+    return;
+  }
 
   Serial.println(
       "Diagnostics REPL. Commands: d[ump], h[exdump], clear, status, t[ime], "
@@ -661,6 +703,10 @@ void handleDiagnosticsBoot() {
     if (uploadLow && !uploadWasLow) {
       logEvent("upload button detected");
       const bool stayAfterLongPress = handleUploadButton();
+      if (storage::protectionLocked()) {
+        enterProtectionSleep();
+        return;
+      }
       if (!stayAfterLongPress && !shouldStayAwake()) {
         enterDeepSleep();
       }
@@ -672,6 +718,10 @@ void handleDiagnosticsBoot() {
     if (rtcLow && !rtcWasLow) {
       logEvent("rtc interrupt detected");
       handleRtcWake(currentTimestamp());
+      if (storage::protectionLocked()) {
+        enterProtectionSleep();
+        return;
+      }
     }
     rtcWasLow = rtcLow;
 
@@ -741,6 +791,10 @@ void handleDiagnosticsBoot() {
                           static_cast<unsigned>(storage::currentPulses()),
                           static_cast<unsigned long>(storage::currentPeriodStart()),
                           static_cast<unsigned long>(awakePulseCount));
+            Serial.printf("protection=%d reset_reason=%d usb_plugged=%d\n",
+                          storage::protectionLocked() ? 1 : 0,
+                          static_cast<int>(esp_reset_reason()),
+                          usbPowered() ? 1 : 0);
             Serial.printf("inputs upload=%s pulse=%s rtc=%s pulse_led=%s awake_led=%s\n",
                           digitalRead(pins::UploadButtonPin) == LOW ? "LOW" : "HIGH",
                           digitalRead(pins::PulseWakePin) == LOW ? "LOW" : "HIGH",
@@ -748,9 +802,18 @@ void handleDiagnosticsBoot() {
                           digitalRead(pins::PulseLedPin) == HIGH ? "HIGH" : "LOW",
                           awakeLed.isFull() ? "FULL" : (awakeLed.isOn() ? "PWM" : "OFF"));
             Serial.printf("time=%s next_alarm=%s\n", nowIso, nextAlarmIso.c_str());
+            if (battery::evaluateProtectionLock(r.volts, usbPowered())) {
+              logEvent("status: protection lock — button-only sleep");
+              enterProtectionSleep();
+              return;
+            }
           } else if (first == 'u') {
             logEvent("upload triggered");
             handleUploadButton(true);
+            if (storage::protectionLocked()) {
+              enterProtectionSleep();
+              return;
+            }
           } else if (first == 'r') {
             ESP.restart();
           } else if (first == 'x') {
@@ -822,7 +885,7 @@ void flushAwakePulses(bool force) {
 }
 
 void keepWifiConnected() {
-  if (!config::KeepWifiConnectedWhenAwake ||
+  if (!config::KeepWifiConnectedWhenAwake || storage::protectionLocked() ||
       millis() - lastWifiCheckMs < config::WifiReconnectIntervalMs) {
     return;
   }
@@ -841,6 +904,10 @@ void pollAwakeControls() {
   const bool uploadPressed = digitalRead(pins::UploadButtonPin) == LOW;
   if (uploadPressed && !uploadWasPressed) {
     const bool stayAfterLongPress = handleUploadButton();
+    if (storage::protectionLocked()) {
+      enterProtectionSleep();
+      return;
+    }
     if (!stayAfterLongPress && !shouldStayAwake()) {
       enterDeepSleep();
     }
@@ -851,6 +918,9 @@ void pollAwakeControls() {
   if (rtcLow && !rtcWasLow) {
     logEvent("rtc interrupt detected");
     handleRtcWake(currentTimestamp());
+    if (storage::protectionLocked()) {
+      enterProtectionSleep();
+    }
   }
   rtcWasLow = rtcLow;
 }
@@ -858,7 +928,7 @@ void pollAwakeControls() {
 void enterStayAwakeMode() {
   // Keep the device awake and listening for pulses when staying awake.
   attachAwakePulseInterrupt();
-  if (config::KeepWifiConnectedWhenAwake) {
+  if (config::KeepWifiConnectedWhenAwake && !storage::protectionLocked()) {
     upload::ensureWifiConnected();
     upload::syncRtcFromNetwork();
   }
@@ -871,14 +941,16 @@ void logBootSummary(esp_sleep_wakeup_cause_t cause, WakeSource wakeSource) {
   if (!config::EnableSerialLogs || !serialStarted) {
     return;
   }
-  Serial.printf("boot cause=%d wake=%s rtc_available=%d storage_available=%d\n",
+  Serial.printf("boot cause=%d wake=%s reset=%d rtc_available=%d storage_available=%d\n",
                 static_cast<int>(cause),
                 wakeSourceName(wakeSource),
+                static_cast<int>(esp_reset_reason()),
                 rtcClockAvailable ? 1 : 0,
                 storageAvailable ? 1 : 0);
-  Serial.printf("stay_awake flash=%d usb=%d => %s\n",
+  Serial.printf("stay_awake flash=%d usb=%d protection=%d => %s\n",
                 storage::stayAwakeBoot() ? 1 : 0,
                 debugHostConnected() ? 1 : 0,
+                storage::protectionLocked() ? 1 : 0,
                 shouldStayAwake() ? "awake" : "sleep");
 }
 
@@ -896,6 +968,11 @@ void setup() {
   // Pulse: leanest path — S0 edge is usually gone; default-to-Pulse already applied.
   if (wakeSource == WakeSource::Pulse) {
     initSubsystems(/*needFullRtc=*/false);
+    if (storage::protectionLocked()) {
+      // Heal: pulse should not be armed while locked.
+      enterProtectionSleep();
+      return;
+    }
     handlePulseWake(currentTimestamp());
     enterDeepSleep();
     return;
@@ -905,7 +982,11 @@ void setup() {
   if (wakeSource == WakeSource::Rtc) {
     initSubsystems(/*needFullRtc=*/true);
     handleRtcWake(currentTimestamp());
-    enterDeepSleep();
+    if (storage::protectionLocked()) {
+      enterProtectionSleep();
+    } else {
+      enterDeepSleep();
+    }
     return;
   }
 
@@ -913,16 +994,26 @@ void setup() {
   if (wakeSource == WakeSource::UploadButton) {
     const UploadPressKind kind = classifyUploadPressFromWake();
 
+    initSerialIfNeeded(/*withLogDelay=*/false);
+    initSubsystems(/*needFullRtc=*/true);
+    logBootSummary(cause, wakeSource);
+    battery::noteResetReason();
+
+    const auto reading = battery::sampleForRecord();
+    if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
+      waitForUploadButtonRelease();
+      awakeLed.rapidErrorBlink();
+      enterProtectionSleep();
+      return;
+    }
+
+    // Restored (or never locked): ensure RTC alarm is armed for normal wakes.
+    rtc_clock::begin();
+    rtc_clock::scheduleNextWakeAlarm();
+
     if (kind == UploadPressKind::Long) {
-      // Only need storage for /stay_awake.dat before toggle feedback.
-      Wire.begin(pins::I2cSdaPin, pins::I2cSclPin);
-      storageAvailable = storage::begin();
       const bool enabled = handleStayAwakeToggle();
       waitForUploadButtonRelease();
-      initSerialIfNeeded(/*withLogDelay=*/true);
-      battery::begin();
-      rtcClockAvailable = rtc_clock::beginTimeOnly();
-      logBootSummary(cause, wakeSource);
       if (enabled) {
         enterStayAwakeMode();
       } else {
@@ -932,10 +1023,11 @@ void setup() {
     }
 
     // Short press → upload.
-    initSerialIfNeeded(/*withLogDelay=*/false);
-    initSubsystems(/*needFullRtc=*/false);
-    logBootSummary(cause, wakeSource);
     handleUploadWake(true);
+    if (storage::protectionLocked()) {
+      enterProtectionSleep();
+      return;
+    }
     if (shouldStayAwake()) {
       enterStayAwakeMode();
       return;
@@ -948,8 +1040,18 @@ void setup() {
   initSerialIfNeeded(/*withLogDelay=*/true);
   initSubsystems(/*needFullRtc=*/false);
   logBootSummary(cause, wakeSource);
+  battery::noteResetReason();
+
+  {
+    const auto reading = battery::sampleForRecord();
+    if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
+      enterProtectionSleep();
+      return;
+    }
+  }
 
   if (rtcClockAvailable) {
+    rtc_clock::begin();
     rtc_clock::scheduleNextWakeAlarm();
   }
 

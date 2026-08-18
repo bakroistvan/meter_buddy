@@ -13,7 +13,7 @@ This document describes **what the firmware does today**, including architecture
 ### US-1 — Isolated meter pulse
 **Given** the device is in deep sleep,  
 **When** a short optical S0 pulse (~3–50 ms) asserts `PulseWakePin` LOW,  
-**Then** the device wakes, flashes the pulse LED ~100 ms, increments the hot pulse counter by 1 via `storage::addPulses` (RTC RAM; does **not** require LittleFS / `storage::begin()` success), and calls `enterDeepSleep()` (deep sleep when enabled; see US-9 if disabled). No Wi‑Fi. No LittleFS period append on this path.
+**Then** if `protectionLocked()` is already true (stray pulse GPIO while locked), firmware heals to `enterProtectionSleep()` without counting (US-11). Otherwise the device flashes the pulse LED ~100 ms, increments the hot pulse counter by 1 via `storage::addPulses` (RTC RAM; does **not** require LittleFS / `storage::begin()` success), and calls `enterDeepSleep()` (deep sleep when enabled; see US-9 if disabled). No Wi‑Fi. No LittleFS period append on this path.
 
 ### US-2 — Frequent / burst pulses
 **Given** another pulse wake occurs more than 0 s and within `PulseAwakeThresholdMs` (8 s) after the last *accepted* pulse wake timestamp,  
@@ -25,12 +25,12 @@ This document describes **what the firmware does today**, including architecture
 ### US-3 — RTC period roll (housekeeping)
 **Given** deep sleep (or an awake diagnostics session),  
 **When** the DS3231 alarm asserts `RtcWakePin` LOW and the RTC path runs,  
-**Then** firmware clears/reschedules the alarm, samples battery via `battery::sampleForRecord()` (forces Wi‑Fi off, waits `BatteryAdcSettleMs`, then ADC sample), and calls `rollCurrentPeriod` with that mV (requires LittleFS / `storage::begin()` success). If hot pulses &gt; 0 and roll succeeds, a completed period record is appended and hot counters reset; if hot == 0, there is no append (period start may advance). With `EnableSerialLogs`, RTC roll always logs `hot_pulses` — including explicit `(no append)` when hot == 0, `-> appended` on success with hot &gt; 0, or `append failed storage_ok=…` when roll fails — plus battery V/pct. Then blinks the status LED once. From a deep-sleep RTC wake, it then calls `enterDeepSleep()`. From diagnostics, the REPL continues without sleeping.
+**Then** firmware clears/reschedules the alarm, samples battery via `battery::sampleForRecord()` (forces Wi‑Fi off, waits `BatteryAdcSettleMs`, then ADC sample), and calls `rollCurrentPeriod` with that mV (requires LittleFS / `storage::begin()` success). If hot pulses &gt; 0 and roll succeeds, a completed period record is appended and hot counters reset; if hot == 0, there is no append (period start may advance). With `EnableSerialLogs`, RTC roll always logs `hot_pulses` — including explicit `(no append)` when hot == 0, `-> appended` on success with hot &gt; 0, or `append failed storage_ok=…` when roll fails — plus battery V/pct. Then blinks the status LED once. After the sample, `evaluateProtectionLock` may latch protection and call `rtc_clock::disableWakeAlarm()` instead of `scheduleNextWakeAlarm`. From a deep-sleep RTC wake, the caller then `enterProtectionSleep()` if locked, else `enterDeepSleep()`. From diagnostics, the REPL continues without sleeping unless protection latched (then `enterProtectionSleep()`).
 
 ### US-4 — Short upload button press
 **Given** sleep or an awake session,  
 **When** the upload button is pressed and released before `UploadLongPressMs` (4 s),  
-**Then** the status LED runs `startPulseBlink` (toggles dim awake ↔ full every 400 ms), `flushAwakePulses(true)` folds any ISR pulses still only in `awakePulseCount` into the open hot period, then one `battery::sampleForRecord()` supplies mV for `rollCurrentPeriod` (stored as `ReadingRecord.batteryMv`, later emitted per reading as `battery_v` / `battery_pct_est`) and the same live sample for top-level upload `battery_v` / `battery_pct_est` on the **first** `sendBatch` POST of the session (≤48 readings); follow-up truncated batches omit those top-level keys (`nullptr` to `buildBody`). Per-reading battery keys are still sent on every batch. `handleUploadWake` owns one radio session: `ensureWifiConnected` once, `syncRtcFromNetwork` once (best-effort), then one or more JSON POSTs reuse the connection (including an empty heartbeat when there are no readings); the sync cursor advances only for batches that contained readings and received HTTP 200/201; a post-upload `flushAwakePulses(true)` credits pulses that arrived during Wi‑Fi/upload into the **new** open period (not this POST); on success with readings an optional OTA check may run while Wi‑Fi is still up (US-10); then `disconnectWifiIfAllowed` (no-op when `KeepWifiConnectedWhenAwake`); on network/HTTP failure the status LED does `rapidErrorBlink` before that disconnect; then `setAwake` restores dim idle PWM and the device sleeps unless stay-awake is active.
+**Then** the status LED runs `startPulseBlink` (toggles dim awake ↔ full every 400 ms), `flushAwakePulses(true)` folds any ISR pulses still only in `awakePulseCount` into the open hot period, then one `battery::sampleForRecord()` supplies mV for `rollCurrentPeriod` (stored as `ReadingRecord.batteryMv`, later emitted per reading as `battery_v` / `battery_pct_est`) and the same live sample for top-level upload `battery_v` / `battery_pct_est` on the **first** `sendBatch` POST of the session (≤48 readings); follow-up truncated batches omit those top-level keys (`nullptr` to `buildBody`). Per-reading battery keys are still sent on every batch. If `evaluateProtectionLock` latches after that sample, Wi‑Fi is **not** started: `rapidErrorBlink`, then the caller enters protection sleep (US-11). Otherwise `handleUploadWake` owns one radio session: `ensureWifiConnected` once, `syncRtcFromNetwork` once (best-effort), then one or more JSON POSTs reuse the connection (including an empty heartbeat when there are no readings; each batch may carry pending `low_battery` / `brownout_lock`); the sync cursor advances only for batches that contained readings and received HTTP 200/201; pending protection errors clear on any successful POST; a post-upload `flushAwakePulses(true)` credits pulses that arrived during Wi‑Fi/upload into the **new** open period (not this POST); on success with readings an optional OTA check may run while Wi‑Fi is still up (US-10); then `disconnectWifiIfAllowed` (no-op when `KeepWifiConnectedWhenAwake`); on network/HTTP failure the status LED does `rapidErrorBlink` before that disconnect; then `setAwake` restores dim idle PWM and the device sleeps unless stay-awake is active.
 
 ### US-5 — Long press toggles stay-awake
 **Given** the upload button is held ≥ 4 s (from deep-sleep wake or while already awake),  
@@ -49,10 +49,10 @@ Exit stay-awake is also via diagnostics serial command `x` (clears the flag and 
 | Command | Action |
 | --- | --- |
 | `d` / `dump…` | Print open-hot summary (`storage_ok`, `hot_pulses`, `hot_start`) and a note that JSON `readings` are rolled LittleFS only (open hot is not included until RTC roll or upload); then `loadUploadBatch` → print `upload::buildBody(batch, &reading)` with `battery::sample()` — same encoder as `sendBatch`, passing the sample so top-level battery keys are present (immediate `sample()`, does **not** force Wi‑Fi off / settle; no roll, no network). Readings in the preview include stored `battery_v` / `battery_pct_est` from each record’s `batteryMv` |
-| `h` / `hexdump…` | `storage::hexdump` — hex of `/records.bin`, `/sync.dat`, `/stay_awake.dat` |
-| `c` / `clear…` | `storage::clear()` |
+| `h` / `hexdump…` | `storage::hexdump` — hex of `/records.bin`, `/sync.dat`, `/stay_awake.dat`, `/brownout.dat` |
+| `c` / `clear…` | `storage::clear()` — removes `/records.bin`, `/sync.dat`, `/stay_awake.dat`, `/brownout.dat` (also clears in-RAM protection lock and pending `low_battery` / `brownout_lock` flags) |
 | `f` / `fill [N]` | Append synthetic rolled LittleFS records for testing (`fillSyntheticRecords`). Default `N=100`; optional count capped at 500; `N<=0` prints `usage: f[ill] [N]  (default 100, max 500)` and does not fill. Flushes awake pulses (`flushAwakePulses(true)`), samples battery via `sample()` for record mV, rolls any open hot period if pulses &gt; 0, zero-pulse-rolls to align `periodStart` to `now - N * RtcWakeIntervalSeconds` (or `0` if that underflows), then for each of `N` periods: random pulses in `1..100`, `addPulses`, `rollCurrentPeriod` spaced by `RtcWakeIntervalSeconds` ending just before now. Prints `filled N records` on success, or `fill failed: …` / `fill failed after K records` on storage/roll failure |
-| `s` / `status…` | Battery via `sample()` plus `adc_cal=<source> ok=<0/1>` (`calibrationSource` / `calibrationOk`), Wi‑Fi, live `awakePulseCount`, GPIO levels, UTC time, next RTC alarm; plus `storage_ok` (`storage::available()`), `unsynced`, `hot_pulses` (`currentPulses()`), `hot_start` (`currentPeriodStart()`), `awake_count` (typing `sleep` is **not** sleep — `s` runs `status`) |
+| `s` / `status…` | Battery via `sample()` plus `adc_cal=<source> ok=<0/1>` (`calibrationSource` / `calibrationOk`), Wi‑Fi, live `awakePulseCount`, GPIO levels, UTC time, next RTC alarm; plus `storage_ok` (`storage::available()`), `unsynced`, `hot_pulses` (`currentPulses()`), `hot_start` (`currentPeriodStart()`), `awake_count` (typing `sleep` is **not** sleep — `s` runs `status`); plus `protection=` (`protectionLocked()`), `reset_reason=` (`esp_reset_reason()`), `usb_plugged=` (`Serial.isPlugged()`). If `evaluateProtectionLock` latches after the sample (low V, no USB), log and `enterProtectionSleep()` (REPL ends) |
 | `t` / `time` | Current UTC time (human format) |
 | `u` / `upload…` | Force upload (`handleUploadButton(true)`) |
 | `r` / `reboot…` | `ESP.restart()` |
@@ -69,13 +69,13 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 ### US-7 — Production cold boot
 **Given** power-on / reset with no GPIO wake cause, stay-awake not required, and `EnableDeepSleep=true`,  
 **When** boot completes,  
-**Then** the next RTC alarm is scheduled (if RTC is available) and the device enters deep sleep immediately (no REPL). If deep sleep is disabled, see US-9.
+**Then** `battery::noteResetReason()` then `sampleForRecord` + `evaluateProtectionLock` may latch protection and `enterProtectionSleep()` (US-11). Otherwise the next RTC alarm is scheduled (if RTC is available) and the device enters deep sleep immediately (no REPL). If deep sleep is disabled, see US-9.
 
 ### US-8 — LED meanings
 | LED | Pin | Meaning |
 | --- | --- | --- |
 | Pulse LED | D8 | HIGH ~100 ms per accepted pulse (wake flash or ISR); off via FreeRTOS one-shot timer reset from ISR (not main-loop polling) |
-| Status (`AwakeLed`) | D10 | Dim PWM (~30%, duty 77) = idle awake; `startPulseBlink` (dim ↔ full every 400 ms, `esp_timer`) = upload in progress; full (`setOn`) + `doubleBlink` + `setAwake` = stay-awake **enabled** (long-press toggle on); `blink` = RTC wake; `rapidErrorBlink` (10×) = upload failure **or** stay-awake **disabled** (long-press toggle off); off + pulldown = sleep. `setAwake` / `setOn` / `setOff` / `setSleep` / `pulse` stop the upload blink timer. |
+| Status (`AwakeLed`) | D10 | Dim PWM (~30%, duty 77) = idle awake; `startPulseBlink` (dim ↔ full every 400 ms, `esp_timer`) = upload in progress; full (`setOn`) + `doubleBlink` + `setAwake` = stay-awake **enabled** (long-press toggle on); `blink` = RTC wake; `rapidErrorBlink` (10×) = upload failure, stay-awake **disabled** (long-press toggle off), **or** protection still latched / upload blocked by protection (button re-sample below unlock without USB); off + pulldown = sleep. `setAwake` / `setOn` / `setOff` / `setSleep` / `pulse` stop the upload blink timer. |
 
 ### US-9 — Deep sleep disabled
 **Given** `EnableDeepSleep=false`,  
@@ -86,6 +86,23 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 **Given** an upload succeeded and at least one reading was marked synced,  
 **When** post-upload housekeeping runs,  
 **Then** `upload::checkFirmwareUpdate()` is invoked while the upload wake’s Wi‑Fi session is still up; `disconnectWifiIfAllowed` runs afterward (unless `KeepWifiConnectedWhenAwake`). The check no-ops only if Wi‑Fi is already disconnected (e.g. connect failed earlier, or the radio dropped and was not restored).
+
+### US-11 — Brown-out / low-battery button-only protection
+**Given** a resting battery sample (`sampleForRecord` or diagnostics `sample`) with pack voltage **&lt;** `BatteryRadioBlockVolts` (3.30) and USB not plugged (`Serial.isPlugged()` false), **or** boot after `ESP_RST_BROWNOUT` (`battery::noteResetReason`),  
+**When** protection evaluates,  
+**Then** firmware latches LittleFS `/brownout.dat` (`storage::setProtectionLocked(true)`), marks a pending upload error (`low_battery` and/or `brownout_lock`), calls `rtc_clock::disableWakeAlarm()` so DS3231 SQW is not held LOW, and enters deep sleep via `enterProtectionSleep()` / `enterDeepSleep()` with **only** `UploadButtonPin` GPIO LOW armed (pulse and RTC wakes **not** armed). Pulses are **not** counted while locked (pulse wake is not armed; a stray pulse GPIO wake heals into protection sleep without `handlePulseWake`). Latch and unlock compare resting ADC volts to `BatteryRadioBlockVolts` / `BatteryRadioUnlockVolts`; they do **not** use `estimatePercent` (a sample can be ~1% SoC at the 3.30 V block, or ~6% at the 3.50 V unlock).
+
+**Button wake while locked:** classify short/long is deferred until after re-sample. Firmware samples with `sampleForRecord()`, then `evaluateProtectionLock`:
+- Still locked (V **&lt;** `BatteryRadioUnlockVolts` (3.50) and not USB-powered) → `waitForUploadButtonRelease`, `rapidErrorBlink`, `enterProtectionSleep()` again — **no Wi‑Fi**, no upload, no stay-awake toggle.
+- Cleared (USB plugged **or** V **≥** unlock) → clear lock in `/brownout.dat`, `rtc_clock::scheduleNextWakeAlarm()`, then honor the already-classified short/long press (upload or stay-awake toggle) and return to normal three-source wake arming afterward.
+
+**Upload path while unlocked but sample goes low:** `handleUploadWake` rolls then `evaluateProtectionLock`; if locked, `rapidErrorBlink`, no `ensureWifiConnected`, then caller enters protection sleep.
+
+**Diagnostics:** `status` prints `protection=`, `reset_reason=`, `usb_plugged=`. If `status` (or diagnostics entry / RTC poll / forced upload) latches protection without USB, the REPL exits via `enterProtectionSleep()`.
+
+**After unlock:** on the next successful POST batch, `storage::attachPendingProtectionErrors` may include `low_battery` and/or `brownout_lock` in `errors[]`; those pending flags clear only after HTTP 200/201 (`clearPendingProtectionErrors`).
+
+USB plugged (`Serial.isPlugged()`): treated as powered — do not enter lock; if already locked, unlock immediately (3V3 is USB-fed). A charge-only source that does not assert plugged still unlocks only via voltage hysteresis on a button wake. Field restore without a PC still needs the button after charge.
 
 ---
 
@@ -111,11 +128,11 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 
 | Module | Role |
 | --- | --- |
-| `main.cpp` | Wake dispatch, pulse ISR, button classify, sleep arming, diagnostics REPL |
-| `storage` | Hot counters in `RTC_DATA_ATTR`; LittleFS `/records.bin`, `/sync.dat`, `/stay_awake.dat`; getters `available()`, `currentPulses()`, `currentPeriodStart()`; `hexdump()` prints file hex to a `Stream` |
-| `upload` | Session helpers `ensureWifiConnected` / `syncRtcFromNetwork` / `disconnectWifiIfAllowed`; `buildBody`/`sendBatch` (POST-only — may reconnect Wi‑Fi if dropped; no NTP; no disconnect; optional `const battery::Reading*` for top-level battery — `battery_v` at 3 decimal places; each reading includes stored `battery_v` / `battery_pct_est` from `record.batteryMv`; `errors[]`); OTA version check |
-| `rtc_clock` | DS3231 time + Alarm1 schedule / clear |
-| `battery` | A0 divider ADC: eFuse-calibrated mV × 2; `estimatePercent` piecewise ADC-volt SoC (4.05 V rest → 100%, 3.26 V empty-cliff → 0%; see Battery ADC); `sample()` immediate; `sampleForRecord()` forces Wi‑Fi off + settle before sample (RTC roll / upload) |
+| `main.cpp` | Wake dispatch, pulse ISR, button classify, sleep arming (three-source vs button-only protection), diagnostics REPL |
+| `storage` | Hot counters in `RTC_DATA_ATTR`; LittleFS `/records.bin`, `/sync.dat`, `/stay_awake.dat`, `/brownout.dat` (protection lock + pending `low_battery` / `brownout_lock` flags); getters `available()`, `currentPulses()`, `currentPeriodStart()`, `protectionLocked()`; `hexdump()` prints file hex to a `Stream` |
+| `upload` | Session helpers `ensureWifiConnected` / `syncRtcFromNetwork` / `disconnectWifiIfAllowed`; `buildBody`/`sendBatch` (POST-only — may reconnect Wi‑Fi if dropped; no NTP; no disconnect; optional `const battery::Reading*` for top-level battery — `battery_v` at 3 decimal places; each reading includes stored `battery_v` / `battery_pct_est` from `record.batteryMv`; `errors[]` including protection codes); OTA version check |
+| `rtc_clock` | DS3231 time + Alarm1 schedule / clear; `disableWakeAlarm()` clears flags and disables Alarm1/2 so SQW is not held LOW during protection sleep |
+| `battery` | A0 divider ADC: eFuse-calibrated mV × 2; `estimatePercent` piecewise ADC-volt SoC (4.05 V rest → 100%, 3.26 V empty-cliff → 0%; see Battery ADC); `sample()` immediate; `sampleForRecord()` forces Wi‑Fi off + settle before sample (RTC roll / upload); `noteResetReason()` / `evaluateProtectionLock()` for brown-out / hysteresis lock |
 | `awake_led` | Status LED PWM and blink patterns |
 | `pins.h` / `config.h` | Pin map and compile-time knobs |
 
@@ -123,7 +140,7 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 
 1. **Hot (RTC RAM):** `rtcCurrentPeriodStart`, `rtcCurrentPulses` — survive deep sleep, lost on power cut. Pulse counts saturate at 65535. Pulse wakes / flushes update these via `storage::addPulses` **without** a LittleFS write and **without** requiring `storage::begin()` / LittleFS mount success (write-endurance + pulse integrity when flash init fails). Exposed read-only as `currentPulses()` / `currentPeriodStart()`; `available()` reflects LittleFS init only.
 2. **Burst timestamps (RTC RAM):** `lastAcceptedPulseWakeUnix` drives the frequent-pulse decision. `lastPulseWakeUnix` is written on each pulse wake but currently unused for decisions.
-3. **Cold (LittleFS):** append-only period records; sync cursor; stay-awake flag. `rollCurrentPeriod`, `loadUploadBatch`, sync/mark, stay-awake flag, and `hexdump`/`clear` require successful `storage::begin()`. After a successful sync of readings, `compactRecords()` rewrites `/records.bin` to drop acknowledged sequences (see §6).
+3. **Cold (LittleFS):** append-only period records; sync cursor; stay-awake flag; protection lock file `/brownout.dat` (locked bit + pending brown-out / low-battery error bits for the next successful POST). `rollCurrentPeriod`, `loadUploadBatch`, sync/mark, stay-awake flag, protection persist, and `hexdump`/`clear` require successful `storage::begin()`. After a successful sync of readings, `compactRecords()` rewrites `/records.bin` to drop acknowledged sequences (see §6).
 
 ### Config knobs (defaults from `config.example.h`)
 
@@ -137,6 +154,8 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 | `UploadLongPressMs` | 4000 | Short vs long press threshold |
 | `RtcWakeIntervalSeconds` | 60 | DS3231 alarm period |
 | `BatteryAdcSettleMs` | 80 | Pause after forcing Wi‑Fi off before ADC used for RTC roll / upload |
+| `BatteryRadioBlockVolts` | 3.30 | Latch button-only protection when resting sample is **below** this (and USB not plugged) |
+| `BatteryRadioUnlockVolts` | 3.50 | Clear protection only when resting sample is **≥** this (or USB plugged) |
 | `EnableDeepSleep` | true | Production sleep vs always-awake |
 | `KeepWifiConnectedWhenAwake` | false | Keep Wi‑Fi after POST / on stay-awake entry |
 | `StayAwakeBoot` | false | Compile-time default for stay-awake cache before/without flash file |
@@ -238,7 +257,7 @@ Example: \(1.2\,\mathrm{kW}\) → \(N_5 = 100\) pulses in 5 minutes; 50 pulses i
 **Battery ADC (firmware):**
 
 - `battery::begin()` configures ADC1 on `BatteryAdcPin` at 12-bit width and `ADC_ATTEN_DB_12` (Arduino pin attenuation still set via `ADC_11db` alias), then calls `esp_adc_cal_characterize` (prefer eFuse TP_FIT → TP → VREF; else default Vref 1100 mV). `calibrationOk()` is true only for eFuse sources; serial logs `source=` / `ok=` and warns on default Vref.
-- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; `estimatePercent` maps ADC volts → SoC via a **piecewise-linear table for this pack + 1:2 divider** (`kOcv` in `src/battery.cpp` — not textbook 4.20 V rest = 100% / 3.30 V = 0%). Anchors from upload `readings[].battery_v`: **4.05 V** rest after onboard ETA4054 CV = 100% (dumps 1171–1366); **3.26 V** last useful hour before the empty cliff = 0% (dumps 989–1171). Mid-curve from that ~11 mA discharge (~543 mAh to empty). Clamp **≥ 4.05 V → 100%** (loaded charge peaks ~4.12–4.18 V also clamp at 100%) and **≤ 3.26 V → 0%**; linear interpolate between neighbors; round to nearest int. **~3.63 V reports ~25%**, not the former ~6% charge-start anchor. Same knots are mirrored in the backend HTML lifetime-calculator fallback (`estimatePercentFromVolts`) when a reading lacks `battery_pct_est` (firmware rounds the interpolated result to nearest int; the JS helper returns the float).
+- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; `estimatePercent` maps ADC volts → SoC via a **piecewise-linear table for this pack + 1:2 divider** (`kOcv` in `src/battery.cpp` — not textbook 4.20 V rest = 100% / 3.30 V = 0%). Anchors from upload `readings[].battery_v`: **4.05 V** rest after onboard ETA4054 CV = 100% (dumps 1171–1366); **3.26 V** last useful hour before the empty cliff = 0% (dumps 989–1171). Mid-curve from that ~11 mA discharge (~543 mAh to empty). Clamp **≥ 4.05 V → 100%** (loaded charge peaks ~4.12–4.18 V also clamp at 100%) and **≤ 3.26 V → 0%**; linear interpolate between neighbors; round to nearest int. **~3.63 V reports ~25%**, not the former ~6% charge-start anchor. Same knots are mirrored in the backend HTML lifetime-calculator fallback (`estimatePercentFromVolts`) when a reading lacks `battery_pct_est` (firmware rounds the interpolated result to nearest int; the JS helper returns the float). Protection latch/unlock (`BatteryRadioBlockVolts` 3.30 / `BatteryRadioUnlockVolts` 3.50) is independent of this SoC table.
 
   | ADC V | % | ADC V | % | ADC V | % |
   | --- | --- | --- | --- | --- | --- |
@@ -251,7 +270,7 @@ Example: \(1.2\,\mathrm{kW}\) → \(N_5 = 100\) pulses in 5 minutes; 50 pulses i
   | | | 3.737 | 40 | 3.26 | 0 |
   | | | 3.714 | 35 | | |
 
-  Operator voltage bands (this ADC + divider): **≥ 4.05 V** full (ETA4054 rest after CV); **~3.78 V** mid (~50%); **~3.63 V** ~25% (old charge-start voltage; not empty); **~3.50 V** ~6% (plan a recharge visit); **≤ 3.26 V** empty (collapse cliff).
+  Operator voltage bands (this ADC + divider): **≥ 4.05 V** full (ETA4054 rest after CV); **~3.78 V** mid (~50%); **~3.63 V** ~25% (old charge-start voltage; not empty); **~3.50 V** ~6% (plan a recharge visit; also `BatteryRadioUnlockVolts`); **~3.30 V** `BatteryRadioBlockVolts` latch (SoC still ~1%, not empty); **≤ 3.26 V** empty (collapse cliff).
 - `sampleForRecord()` forces `WIFI_OFF` if needed, waits `BatteryAdcSettleMs` (default 80 ms), then `sample()`. Used by RTC roll (stores `batteryMv` on the period record; that mV is later emitted per reading on upload) and once on upload wake (same sample for roll mV and first-POST top-level JSON). Diagnostics `status` / `dump` use `sample()` only.
 - With `EnableSerialLogs`, battery voltage is logged at **3 decimal places** (`%.3fV`) on RTC roll, upload batch, `status`, and related paths.
 
@@ -261,14 +280,14 @@ Example: \(1.2\,\mathrm{kW}\) → \(N_5 = 100\) pulses in 5 minutes; 50 pulses i
 
 There is **no** ESP32 timer deep-sleep wake. Periodicity comes from the external DS3231 Alarm1 → `RtcWakePin` LOW.
 
-Deep sleep arms **GPIO level wake (LOW)** on three pins (ESP32-C3 wake-capable GPIOs 0–5):
+Deep sleep arms **GPIO level wake (LOW)** on ESP32-C3 wake-capable GPIOs 0–5. In **normal** operation all three sources below are armed; while `storage::protectionLocked()` is true, **only** the upload button is armed (US-11).
 
-| Source | Pin | Sleep arm | Identification after wake | Handler |
-| --- | --- | --- | --- | --- |
-| Upload button | D1 / GPIO3 | `GPIO_LOW` | Pin still LOW (priority 1) | Short → upload; long → stay-awake toggle (enable → stay awake; disable → sleep) |
-| RTC alarm | D3 / GPIO5 | `GPIO_LOW` | Pin still LOW if button not LOW | `handleRtcWake` |
-| S0 pulse | D2 / GPIO4 | `GPIO_LOW` | Often already HIGH; **default** if GPIO wake | `handlePulseWake` (always credit 1) |
-| Cold / other | — | — | Cause ≠ `ESP_SLEEP_WAKEUP_GPIO` | Stay or sleep via `shouldStayAwake()` |
+| Source | Pin | Sleep arm (normal) | Sleep arm (protection) | Identification after wake | Handler |
+| --- | --- | --- | --- | --- | --- |
+| Upload button | D1 / GPIO3 | `GPIO_LOW` | `GPIO_LOW` | Pin still LOW (priority 1) | Short → upload; long → stay-awake toggle (enable → stay awake; disable → sleep). While still locked after re-sample → `rapidErrorBlink` + button-only sleep (no Wi‑Fi) |
+| RTC alarm | D3 / GPIO5 | `GPIO_LOW` | **not armed**; alarm disabled via `rtc_clock::disableWakeAlarm()` | Pin still LOW if button not LOW | `handleRtcWake` (if somehow woken: sample may re-latch protection) |
+| S0 pulse | D2 / GPIO4 | `GPIO_LOW` | **not armed** | Often already HIGH; **default** if GPIO wake | `handlePulseWake` (always credit 1). If lock still set on pulse path → heal to `enterProtectionSleep()` without counting |
+| Cold / other | — | — | — | Cause ≠ `ESP_SLEEP_WAKEUP_GPIO` | `noteResetReason` + battery sample may latch protection; else stay or sleep via `shouldStayAwake()` |
 
 ### Resolve policy
 
@@ -290,9 +309,12 @@ else → Pulse   // S0 edges are short; pin often already HIGH
 ### Pre-sleep settling (`enterDeepSleep`)
 
 1. Pulse / status LEDs off; Wi‑Fi off.
-2. Wait until pulse pin is HIGH (up to `PulseDebounceMs * 4`) so level wake does not double-count.
+2. If **not** protection-locked: wait until pulse pin is HIGH (up to `PulseDebounceMs * 4`) so level wake does not double-count. (Skipped when locked — pulse is not a wake source.)
 3. Wait for upload button release with debounce (avoids re-wake loops).
-4. Arm all three GPIO LOW wakes; `esp_deep_sleep_start()`.
+4. Arm GPIO LOW wake on `UploadButtonPin`. If **not** protection-locked, also arm `RtcWakePin` and `PulseWakePin`.
+5. `esp_deep_sleep_start()`.
+
+`enterProtectionSleep()` calls `rtc_clock::disableWakeAlarm()` (when RTC init succeeded) then `enterDeepSleep()` so SQW cannot assert while only the button is armed.
 
 ---
 
@@ -305,20 +327,31 @@ flowchart TD
   A[setup: OTA mark valid] --> B[initWakePinsAndLed]
   B --> C[resolveWakeSource]
   C -->|Pulse| P[initSubsystems timeOnly]
-  P --> P2[handlePulseWake]
+  P --> PLock{protectionLocked?}
+  PLock -->|yes| PS[enterProtectionSleep]
+  PLock -->|no| P2[handlePulseWake]
   P2 --> S[enterDeepSleep]
   C -->|Rtc| R[initSubsystems full RTC]
   R --> R2[handleRtcWake]
-  R2 --> S
+  R2 --> RLock{protectionLocked?}
+  RLock -->|yes| PS
+  RLock -->|no| S
   C -->|UploadButton| U[classifyUploadPressFromWake]
-  U -->|Long| L[storage begin + handleStayAwakeToggle]
+  U --> UInit[init + noteResetReason + sampleForRecord]
+  UInit --> UEval{evaluateProtectionLock}
+  UEval -->|still locked| UBlk[rapidErrorBlink + enterProtectionSleep]
+  UEval -->|cleared / ok| USched[scheduleNextWakeAlarm]
+  USched -->|Long| L[handleStayAwakeToggle]
   L -->|enabled| SA[enterStayAwakeMode]
   L -->|disabled| S
-  U -->|Short| UP[handleUploadWake]
+  USched -->|Short| UP[handleUploadWake]
+  UP -->|protection latched mid-upload| PS
   UP -->|shouldStayAwake| SA
   UP -->|else| S
-  C -->|None / cold| COLD[init serial + subsystems]
-  COLD --> ALARM[scheduleNextWakeAlarm if RTC ok]
+  C -->|None / cold| COLD[init serial + subsystems + noteResetReason]
+  COLD --> CSamp[sampleForRecord + evaluateProtectionLock]
+  CSamp -->|locked| PS
+  CSamp -->|ok| ALARM[scheduleNextWakeAlarm if RTC ok]
   ALARM -->|shouldStayAwake| SA
   ALARM -->|else| S
 ```
@@ -403,9 +436,11 @@ Deep-sleep wakes are **single-shot**, not nested. Concurrent GPIO assertions col
 2. `flushAwakePulses(true)` so any pulses still only in `awakePulseCount` are written into the open hot period before it rolls.
 3. One `battery::sampleForRecord()`; `rollCurrentPeriod` with that mV (closes the period into LittleFS; `batteryMv` is stored on the record and later emitted per reading as `battery_v` / `battery_pct_est`). With `EnableSerialLogs`, the upload path may also call `storage::hexdump` before/after `rollCurrentPeriod` for serial debug (not the REPL `h` command).
 4. `upload::ensureWifiConnected()` once. On failure, mark the wake failed and skip POSTs/NTP. On success, `upload::syncRtcFromNetwork()` once (best-effort — failure does not abort the wake).
-5. Loop: `loadUploadBatch` → `upload::sendBatch(batch, includeBattery ? &reading : nullptr)` (`buildBody` + HTTPS/HTTP POST only; may call `ensureWifiConnected` again if the link dropped; no NTP; no disconnect). `includeBattery` starts true so the first POST of the session gets top-level `battery_v` / `battery_pct_est`; then set false so follow-up truncated batches omit those keys. On Success with `count > 0` → `markSyncedThrough`; continue while `truncated`; stop on empty/non-truncated or failure.
+5. Loop: `loadUploadBatch` → `storage::attachPendingProtectionErrors(batch)` → `upload::sendBatch(batch, includeBattery ? &reading : nullptr)` (`buildBody` + HTTPS/HTTP POST only; may call `ensureWifiConnected` again if the link dropped; no NTP; no disconnect). `includeBattery` starts true so the first POST of the session gets top-level `battery_v` / `battery_pct_est`; then set false so follow-up truncated batches omit those keys. On Success with `count > 0` → `markSyncedThrough`; on any Success → `clearPendingProtectionErrors()`; continue while `truncated`; stop on empty/non-truncated or failure.
 6. `flushAwakePulses(true)` again so pulses counted during Wi‑Fi/upload enter the **new** open period (not the batch just posted); detach ISR if this path attached it.
 7. Success + had readings → optional OTA check via `upload::checkFirmwareUpdate()` while Wi‑Fi is still up; failure → `rapidErrorBlink`. Then `upload::disconnectWifiIfAllowed()` (skipped when `KeepWifiConnectedWhenAwake`); restore dim awake LED. USB flashing remains a valid primary install path.
+
+If `evaluateProtectionLock` after the pre-upload sample returns true, steps 4–7 are skipped: `rapidErrorBlink`, disconnect helpers, restore dim LED; caller enters protection sleep.
 
 ### Sync cursor and compaction
 
@@ -422,7 +457,7 @@ Upload POSTs use `WiFiClientSecure` with HTTP Basic Auth (`BasicAuthUser` / `Bas
 
 ### Batch / error payload
 
-The device always attempts a POST (empty `readings` allowed). Storage may attach `errors[]` such as `no_data`, `crc_mismatch`, `storage_unavailable`, `batch_truncated`. Sync advances only on HTTP 200/201 for batches that contained readings. An empty successful heartbeat does **not** error-blink. Payload includes `"upload_trigger":"button"`. Each reading object on the wire is `timestamp` / `period_start` / `pulses` / `battery_v` / `battery_pct_est` (`battery_v` from stored `batteryMv / 1000` at 3 decimal places; `battery_pct_est` recomputed via `estimatePercent` from that voltage — percent is not stored on disk). Top-level battery keys appear only when `sendBatch` receives a non-null `battery::Reading*` (first batch of an upload wake, or diagnostics `dump` preview); `battery_v` is serialized with three decimal places (`String(volts, 3)` in `upload::buildBody`).
+The device always attempts a POST (empty `readings` allowed). Storage may attach `errors[]` such as `no_data`, `crc_mismatch`, `storage_unavailable`, `batch_truncated`, and — after a prior protection latch — `low_battery` and/or `brownout_lock` via `attachPendingProtectionErrors` (cleared on the next HTTP 200/201). Sync advances only on HTTP 200/201 for batches that contained readings. An empty successful heartbeat does **not** error-blink. Payload includes `"upload_trigger":"button"`. Each reading object on the wire is `timestamp` / `period_start` / `pulses` / `battery_v` / `battery_pct_est` (`battery_v` from stored `batteryMv / 1000` at 3 decimal places; `battery_pct_est` recomputed via `estimatePercent` from that voltage — percent is not stored on disk). Top-level battery keys appear only when `sendBatch` receives a non-null `battery::Reading*` (first batch of an upload wake, or diagnostics `dump` preview); `battery_v` is serialized with three decimal places (`String(volts, 3)` in `upload::buildBody`).
 
 ---
 
@@ -430,9 +465,14 @@ The device always attempts a POST (empty `readings` allowed). Storage may attach
 
 ```text
 shouldStayAwake =
-  (serialStarted AND Serial plugged AND CDC connected)
-  OR storage::stayAwakeBoot()
+  NOT (protectionLocked AND NOT usbPowered)
+  AND (
+    (serialStarted AND Serial plugged AND CDC connected)
+    OR storage::stayAwakeBoot()
+  )
 ```
+
+`usbPowered` is `Serial.isPlugged()` (USB VBUS). While protection is latched without USB, stay-awake / debug-host must not keep the device awake.
 
 `storage::stayAwakeBoot()` reflects the LittleFS flag (seeded from compile-time `StayAwakeBoot` before/without a flash file). Long-press **toggles** the flash flag via `handleStayAwakeToggle()` (in-RAM still updates even if LittleFS write fails): enable → LED full + `doubleBlink` + `setAwake`, session stays / enters stay-awake; disable → `rapidErrorBlink`, then `enterDeepSleep()` after button release wait. Clearing the flag is also via diagnostics command `x`, which then calls `enterDeepSleep()`.
 
@@ -443,14 +483,15 @@ shouldStayAwake =
 1. `esp_ota_mark_app_valid_cancel_rollback()` on every boot.
 2. Pins + LED `setAwake()` first (user feedback + correct pin sample).
 3. Resolve wake **before** Serial delay / heavy init.
-4. Upload classify **before** LittleFS/I2C on the button wake path.
-5. Pulse path is leanest: `initSubsystems(timeOnly)` only.
+4. Upload classify **before** LittleFS/I2C on the button wake path; after init, `battery::noteResetReason()` then `sampleForRecord` + `evaluateProtectionLock` before upload / stay-awake (still-locked → `rapidErrorBlink` + protection sleep).
+5. Pulse path is leanest: `initSubsystems(timeOnly)` only; if already protection-locked, heal to `enterProtectionSleep()` without counting.
+6. Cold / non-GPIO boot: `noteResetReason` + sample may latch protection before scheduling the RTC alarm.
 
 Timestamps use DS3231 when RTC init succeeded; otherwise `millis()/1000` fallback (affects burst intervals and period rolls).
 
-Stay-awake enters `handleDiagnosticsBoot()` which never returns; Arduino `loop()` is unused in that mode. With deep sleep enabled and no stay-awake, `setup` sleeps and does not return.
+Stay-awake enters `handleDiagnosticsBoot()` which never returns; Arduino `loop()` is unused in that mode. With deep sleep enabled and no stay-awake, `setup` sleeps and does not return. Diagnostics entry / `status` / RTC-poll-in-REPL may exit to `enterProtectionSleep()` if a sample latches the lock without USB.
 
-**RTC while diagnostics:** `handleRtcWake` from the REPL rolls the period and reschedules the alarm but does **not** sleep — the REPL continues.
+**RTC while diagnostics:** `handleRtcWake` from the REPL rolls the period and reschedules the alarm but does **not** sleep — the REPL continues — **unless** the roll sample latches protection, in which case `enterProtectionSleep()` ends the REPL.
 
 ---
 
