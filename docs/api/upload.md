@@ -25,15 +25,15 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
   "device_id": "meter-buddy-001",
   "meter_impulses_per_kwh": 1000,
   "upload_trigger": "button",
-  "battery_v": 3.870,
-  "battery_pct_est": 62,
+  "battery_v": 3.775,
+  "battery_pct_est": 50,
   "readings": [
     {
       "timestamp": "2026-05-01T13:00:00Z",
       "period_start": "2026-05-01T12:00:00Z",
       "pulses": 42,
-      "battery_v": 3.870,
-      "battery_pct_est": 62
+      "battery_v": 3.775,
+      "battery_pct_est": 50
     }
   ],
   "errors": [
@@ -49,7 +49,7 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `meter_impulses_per_kwh` | int | yes | Must be `> 0` |
 | `upload_trigger` | string \| null | no | Firmware currently sends `"button"`; max 40 chars |
 | `battery_v` | float \| null | no | Top-level live sample; volts; `>= 0` if present. Firmware serializes with **3 decimal places** (`String(volts, 3)` in `buildBody`). Firmware may omit the key. On a real upload wake, filled from one `battery::sampleForRecord()` (Wi‑Fi forced off + settle) shared with the pre-upload roll, and only on the first POST of that multi-batch session; diagnostics `dump` preview uses immediate `sample()` |
-| `battery_pct_est` | int \| null | no | Top-level estimate; 0–100 if present (same sample as `battery_v`). Firmware may omit the key with `battery_v` |
+| `battery_pct_est` | int \| null | no | Top-level estimate; 0–100 if present (same sample as `battery_v`). Firmware may omit the key with `battery_v`. Mapping is `battery::estimatePercent` (board-calibrated piecewise ADC-volt table: **≥ 4.05 V** rest after ETA4054 CV → 100%, **≤ 3.26 V** empty-cliff → 0%; loaded charge peaks ~4.12–4.18 V also clamp at 100%; not textbook 4.20/3.30 — see [fw_specification.md](../firmware/fw_specification.md) Battery ADC) |
 | `readings` | array | yes (may be empty) | List of period records |
 | `errors` | array | no (default `[]`) | Device-side issues discovered while building the batch |
 
@@ -61,7 +61,7 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `period_start` | ISO-8601 datetime \| null | no | Period start |
 | `pulses` | int | yes | `>= 0` |
 | `battery_v` | float \| null | no | Volts from stored `ReadingRecord.batteryMv / 1000`; firmware always emits this on each reading, serialized with **3 decimal places** (`String(volts, 3)`). Backend still accepts omitted keys (clients that omit them stay omitted) |
-| `battery_pct_est` | int \| null | no | 0–100 estimate recomputed via `battery::estimatePercent` from that same voltage; percent is **not** stored on disk. Firmware always emits this on each reading |
+| `battery_pct_est` | int \| null | no | 0–100 estimate recomputed via `battery::estimatePercent` from that same voltage; percent is **not** stored on disk. Firmware always emits this on each reading. Same board-calibrated piecewise ADC-volt table as top-level (**≥ 4.05 V** → 100%, **≤ 3.26 V** → 0%; interpolate between knots; firmware rounds to nearest int) |
 
 ### Error object
 
@@ -121,7 +121,7 @@ Every backend route requires HTTP Basic Auth (`METER_BUDDY_AUTH_USER` / `METER_B
 | `GET`/`POST`/`DELETE` | `/db` | Basic | Download / replace / reset SQLite |
 | `WS` | `/ws` | Basic | Push `{ "type": "new_dump", "dump": {…meta} }` |
 
-Dump list / meta battery fields are read with `json_extract` on top-level `raw_json` (`$.battery_v` / `$.battery_pct_est`). The HTML index formats `battery_v` with three decimal places in the dump list, chart panel, and telemetry readout. `store_upload` persists `raw_json` via `model_dump(..., exclude_none=True)` so omitted optional keys stay omitted in stored JSON.
+Dump list / meta battery fields are read with `json_extract` on top-level `raw_json` (`$.battery_v` / `$.battery_pct_est`). The HTML index formats `battery_v` with three decimal places in the dump list, chart panel, and telemetry readout. When a reading lacks `battery_pct_est`, the lifetime calculator recomputes SoC from `battery_v` via `estimatePercentFromVolts` (same knots as firmware `kOcv`; see [fw_specification.md](../firmware/fw_specification.md) Battery ADC). `store_upload` persists `raw_json` via `model_dump(..., exclude_none=True)` so omitted optional keys stay omitted in stored JSON.
 
 ## Firmware configuration
 

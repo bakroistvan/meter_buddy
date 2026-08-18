@@ -115,7 +115,7 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 | `storage` | Hot counters in `RTC_DATA_ATTR`; LittleFS `/records.bin`, `/sync.dat`, `/stay_awake.dat`; getters `available()`, `currentPulses()`, `currentPeriodStart()`; `hexdump()` prints file hex to a `Stream` |
 | `upload` | Session helpers `ensureWifiConnected` / `syncRtcFromNetwork` / `disconnectWifiIfAllowed`; `buildBody`/`sendBatch` (POST-only — may reconnect Wi‑Fi if dropped; no NTP; no disconnect; optional `const battery::Reading*` for top-level battery — `battery_v` at 3 decimal places; each reading includes stored `battery_v` / `battery_pct_est` from `record.batteryMv`; `errors[]`); OTA version check |
 | `rtc_clock` | DS3231 time + Alarm1 schedule / clear |
-| `battery` | A0 divider ADC: eFuse-calibrated mV × 2; `sample()` immediate; `sampleForRecord()` forces Wi‑Fi off + settle before sample (RTC roll / upload) |
+| `battery` | A0 divider ADC: eFuse-calibrated mV × 2; `estimatePercent` piecewise ADC-volt SoC (4.05 V rest → 100%, 3.26 V empty-cliff → 0%; see Battery ADC); `sample()` immediate; `sampleForRecord()` forces Wi‑Fi off + settle before sample (RTC roll / upload) |
 | `awake_led` | Status LED PWM and blink patterns |
 | `pins.h` / `config.h` | Pin map and compile-time knobs |
 
@@ -238,7 +238,20 @@ Example: \(1.2\,\mathrm{kW}\) → \(N_5 = 100\) pulses in 5 minutes; 50 pulses i
 **Battery ADC (firmware):**
 
 - `battery::begin()` configures ADC1 on `BatteryAdcPin` at 12-bit width and `ADC_ATTEN_DB_12` (Arduino pin attenuation still set via `ADC_11db` alias), then calls `esp_adc_cal_characterize` (prefer eFuse TP_FIT → TP → VREF; else default Vref 1100 mV). `calibrationOk()` is true only for eFuse sources; serial logs `source=` / `ok=` and warns on default Vref.
-- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; `estimatePercent` maps volts → SoC via a **piecewise-linear single-cell LiPo resting OCV** table (descending breakpoints from 4.20 V → 100% through mid-curve knees such as 3.61 V → 5%, down to 3.30 V → 0%; clamp above/below ends; linear interpolate between neighbors, round to nearest int). Anchored for ETA4054 + LiPo so ~3.63 V (USB charge-start cal 2026-08-02) reports ~6%, not the old linear ~37%. Same curve is mirrored in the backend HTML UI fallback (`estimatePercentFromVolts`) when a reading lacks `battery_pct_est`.
+- `sample()` averages 16× (`adc1_get_raw` → `esp_adc_cal_raw_to_voltage`), then × **2** divider → volts; `estimatePercent` maps ADC volts → SoC via a **piecewise-linear table for this pack + 1:2 divider** (`kOcv` in `src/battery.cpp` — not textbook 4.20 V rest = 100% / 3.30 V = 0%). Anchors from upload `readings[].battery_v`: **4.05 V** rest after onboard ETA4054 CV = 100% (dumps 1171–1366); **3.26 V** last useful hour before the empty cliff = 0% (dumps 989–1171). Mid-curve from that ~11 mA discharge (~543 mAh to empty). Clamp **≥ 4.05 V → 100%** (loaded charge peaks ~4.12–4.18 V also clamp at 100%) and **≤ 3.26 V → 0%**; linear interpolate between neighbors; round to nearest int. **~3.63 V reports ~25%**, not the former ~6% charge-start anchor. Same knots are mirrored in the backend HTML lifetime-calculator fallback (`estimatePercentFromVolts`) when a reading lacks `battery_pct_est` (firmware rounds the interpolated result to nearest int; the JS helper returns the float).
+
+  | ADC V | % | ADC V | % | ADC V | % |
+  | --- | --- | --- | --- | --- | --- |
+  | 4.05 | 100 | 3.853 | 70 | 3.690 | 30 |
+  | 3.994 | 95 | 3.834 | 65 | 3.634 | 25 |
+  | 3.938 | 90 | 3.811 | 60 | 3.593 | 20 |
+  | 3.908 | 85 | 3.794 | 55 | 3.582 | 15 |
+  | 3.890 | 80 | 3.775 | 50 | 3.549 | 10 |
+  | 3.872 | 75 | 3.758 | 45 | 3.482 | 5 |
+  | | | 3.737 | 40 | 3.26 | 0 |
+  | | | 3.714 | 35 | | |
+
+  Operator voltage bands (this ADC + divider): **≥ 4.05 V** full (ETA4054 rest after CV); **~3.78 V** mid (~50%); **~3.63 V** ~25% (old charge-start voltage; not empty); **~3.50 V** ~6% (plan a recharge visit); **≤ 3.26 V** empty (collapse cliff).
 - `sampleForRecord()` forces `WIFI_OFF` if needed, waits `BatteryAdcSettleMs` (default 80 ms), then `sample()`. Used by RTC roll (stores `batteryMv` on the period record; that mV is later emitted per reading on upload) and once on upload wake (same sample for roll mV and first-POST top-level JSON). Diagnostics `status` / `dump` use `sample()` only.
 - With `EnableSerialLogs`, battery voltage is logged at **3 decimal places** (`%.3fV`) on RTC roll, upload batch, `status`, and related paths.
 

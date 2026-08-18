@@ -1,41 +1,42 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Piecewise LiPo OCV curve (matches battery::estimatePercent).
+# ADC-volt → SoC (matches battery::estimatePercent).
 OCV = np.array(
     [
-        [4.20, 100],
-        [4.15, 95],
-        [4.11, 90],
-        [4.08, 85],
-        [4.02, 80],
-        [3.98, 75],
-        [3.95, 70],
-        [3.91, 65],
-        [3.87, 60],
-        [3.85, 55],
-        [3.84, 50],
-        [3.82, 45],
-        [3.80, 40],
-        [3.79, 35],
-        [3.77, 30],
-        [3.75, 25],
-        [3.73, 20],
-        [3.71, 15],
-        [3.69, 10],
-        [3.61, 5],
-        [3.30, 0],
+        [4.05, 100],
+        [3.994, 95],
+        [3.938, 90],
+        [3.908, 85],
+        [3.890, 80],
+        [3.872, 75],
+        [3.853, 70],
+        [3.834, 65],
+        [3.811, 60],
+        [3.794, 55],
+        [3.775, 50],
+        [3.758, 45],
+        [3.737, 40],
+        [3.714, 35],
+        [3.690, 30],
+        [3.634, 25],
+        [3.593, 20],
+        [3.582, 15],
+        [3.549, 10],
+        [3.482, 5],
+        [3.26, 0],
     ]
 )
 
-volts = np.linspace(3.30, 4.20, 200)
+volts = np.linspace(3.26, 4.20, 200)
 legacy = (volts - 3.30) * 100.0 / (4.20 - 3.30)
 ocv_pct = np.interp(volts, OCV[::-1, 0], OCV[::-1, 1])
 
 plt.figure(figsize=(8, 5))
 plt.plot(volts, legacy, label="Legacy linear 3.30–4.20", color="#6b7280", linestyle="--", linewidth=1.8)
-plt.plot(volts, ocv_pct, label="LiPo resting OCV (firmware)", color="teal", linewidth=2.5)
-plt.axvline(3.63, color="#b45309", linestyle=":", alpha=0.8, label="USB charge start (~3.63 V)")
+plt.plot(volts, ocv_pct, label="Firmware ADC-volt SoC", color="teal", linewidth=2.5)
+plt.axvline(4.05, color="#0f766e", linestyle=":", alpha=0.8, label="ETA4054 rest-full (~4.05 V)")
+plt.axvline(3.26, color="#b91c1c", linestyle=":", alpha=0.8, label="Empty cliff (~3.26 V)")
 plt.title("Voltage vs. Battery Percentage")
 plt.xlabel("Voltage (V)")
 plt.ylabel("Percentage (%)")

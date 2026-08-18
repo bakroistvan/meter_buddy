@@ -149,18 +149,21 @@ Reading sampleForRecord() {
 }
 
 uint8_t estimatePercent(float volts) {
-  // Piecewise-linear single-cell LiPo resting OCV → SoC.
-  // Anchored so ~3.63 V (USB charge start 2026-08-02) maps near empty (~6%),
-  // not the old linear 3.30–4.20 map which reported ~37% there.
+  // Piecewise-linear ADC-volt → SoC for this pack + 1:2 divider (not textbook
+  // 4.20 V OCV). Anchors from readings[].battery_v:
+  //   100% ≈ 4.05 V rest after onboard ETA4054 CV (dumps 1171–1366)
+  //   0%   ≈ 3.26 V last useful hour before empty cliff (dumps 989–1171)
+  // Mid-curve from that discharge at ~11 mA (543 mAh to empty). Loaded charge
+  // peaks (~4.12–4.18 V) clamp at 100%. ~3.63 V is ~25%, not the old 6%.
   static constexpr struct {
     float volts;
     uint8_t percent;
   } kOcv[] = {
-      {4.20f, 100}, {4.15f, 95}, {4.11f, 90}, {4.08f, 85}, {4.02f, 80},
-      {3.98f, 75},  {3.95f, 70}, {3.91f, 65}, {3.87f, 60}, {3.85f, 55},
-      {3.84f, 50},  {3.82f, 45}, {3.80f, 40}, {3.79f, 35}, {3.77f, 30},
-      {3.75f, 25},  {3.73f, 20}, {3.71f, 15}, {3.69f, 10}, {3.61f, 5},
-      {3.30f, 0},
+      {4.05f, 100}, {3.994f, 95}, {3.938f, 90}, {3.908f, 85}, {3.890f, 80},
+      {3.872f, 75}, {3.853f, 70},  {3.834f, 65}, {3.811f, 60}, {3.794f, 55},
+      {3.775f, 50}, {3.758f, 45},  {3.737f, 40}, {3.714f, 35}, {3.690f, 30},
+      {3.634f, 25}, {3.593f, 20},  {3.582f, 15}, {3.549f, 10}, {3.482f, 5},
+      {3.26f, 0},
   };
   constexpr size_t kCount = sizeof(kOcv) / sizeof(kOcv[0]);
 

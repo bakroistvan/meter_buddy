@@ -27,33 +27,33 @@ import numpy as np
 
 DEFAULT_REMOTE = "http://192.168.40.222:8000"
 
-# Approximate single-cell LiPo resting OCV -> SoC (V, %).
+# ADC-volt → SoC (matches battery::estimatePercent).
 LIPO_OCV_CURVE: list[tuple[float, float]] = [
-    (4.20, 100.0),
-    (4.15, 95.0),
-    (4.11, 90.0),
-    (4.08, 85.0),
-    (4.02, 80.0),
-    (3.98, 75.0),
-    (3.95, 70.0),
-    (3.91, 65.0),
-    (3.87, 60.0),
-    (3.85, 55.0),
-    (3.84, 50.0),
-    (3.82, 45.0),
-    (3.80, 40.0),
-    (3.79, 35.0),
-    (3.77, 30.0),
-    (3.75, 25.0),
-    (3.73, 20.0),
-    (3.71, 15.0),
-    (3.69, 10.0),
-    (3.61, 5.0),
-    (3.30, 0.0),
+    (4.05, 100.0),
+    (3.994, 95.0),
+    (3.938, 90.0),
+    (3.908, 85.0),
+    (3.890, 80.0),
+    (3.872, 75.0),
+    (3.853, 70.0),
+    (3.834, 65.0),
+    (3.811, 60.0),
+    (3.794, 55.0),
+    (3.775, 50.0),
+    (3.758, 45.0),
+    (3.737, 40.0),
+    (3.714, 35.0),
+    (3.690, 30.0),
+    (3.634, 25.0),
+    (3.593, 20.0),
+    (3.582, 15.0),
+    (3.549, 10.0),
+    (3.482, 5.0),
+    (3.26, 0.0),
 ]
 
-V_EMPTY = 3.30
-V_FULL = 4.20
+V_EMPTY = 3.26
+V_FULL = 4.05
 
 
 @dataclass(frozen=True)
@@ -136,7 +136,7 @@ def interpolate_pct(volts: float, curve: list[tuple[float, float]]) -> float:
 
 
 def firmware_linear_pct(volts: np.ndarray | float) -> np.ndarray | float:
-    return np.clip((np.asarray(volts) - V_EMPTY) * 100.0 / (V_FULL - V_EMPTY), 0.0, 100.0)
+    return np.clip((np.asarray(volts) - 3.30) * 100.0 / (4.20 - 3.30), 0.0, 100.0)
 
 
 def fit_pct_vs_volts(volts: np.ndarray, pct: np.ndarray, degree: int) -> np.polynomial.Polynomial:
@@ -170,7 +170,7 @@ def plot_curves(
 
     ax = axes[0]
     ax.scatter(real_v, real_pct, s=12, alpha=0.35, color="#0f766e", label=f"readings (n={len(with_pct)})")
-    ax.plot(v_grid, theory_pct, color="#b45309", linewidth=2.2, label="firmware / theory LiPo OCV")
+    ax.plot(v_grid, theory_pct, color="#b45309", linewidth=2.2, label="firmware ADC-volt SoC")
     ax.plot(v_grid, fit_pct, color="#1d4ed8", linewidth=2.2, label=f"fit poly deg {fit.degree()}")
     ax.plot(v_grid, linear_pct, color="#6b7280", linewidth=1.4, linestyle="--", label="legacy linear 3.30–4.20")
     ax.set_xlabel("Battery voltage (V)")
