@@ -18,7 +18,7 @@ Firmware only advances its sync cursor on HTTP **200** or **201** after a batch 
 
 Unknown fields are rejected (`extra = forbid` on the backend). Empty `readings` are allowed (heartbeat / error-only upload).
 
-Firmware may omit optional keys entirely (not send `null`). When more than one POST is needed in a single upload wake (batches of **128** readings, `storage::MaxUploadRecords`), top-level `battery_v` / `battery_pct_est` are included only on the **first** `HttpSession::post` of that session; follow-up truncated batches omit those keys.
+Firmware may omit optional keys entirely (not send `null`). When more than one POST is needed in a single upload wake (batches of **128** readings, `config::MaxUploadRecords`), top-level `battery_v` / `battery_pct_est` are included only on the **first** `HttpSession::post` of that session; follow-up truncated batches omit those keys. `errors[]` is capped at `config::MaxUploadErrors` = **8**.
 
 ```json
 {
@@ -52,8 +52,8 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `upload_trigger` | string \| null | no | Firmware currently sends `"button"`; max 40 chars |
 | `battery_v` | float \| null | no | Top-level live sample; volts; `>= 0` if present. Firmware serializes with **3 decimal places** (`snprintf` `%.3f` in `buildBody`). Firmware may omit the key. On a real upload wake, filled from one `battery::sampleForRecord()` (Wi‑Fi forced off + settle) shared with the pre-upload roll, and only on the first POST of that multi-batch session; diagnostics `dump` preview uses immediate `sample()` |
 | `battery_pct_est` | int \| null | no | Top-level estimate; 0–100 if present (same sample as `battery_v`). Firmware may omit the key with `battery_v`. Mapping is `battery::estimatePercent` (board-calibrated piecewise ADC-volt table: **≥ 4.05 V** rest after ETA4054 CV → 100%, **≤ 3.26 V** empty-cliff → 0%; loaded charge peaks ~4.12–4.18 V also clamp at 100%; not textbook 4.20/3.30 — see [fw_specification.md](../firmware/fw_specification.md) Battery ADC). Independent of protection hysteresis (`BatteryRadioBlockVolts` 3.30 / `BatteryRadioUnlockVolts` 3.50): 3.30 V is ~1% SoC, not 0%; 3.50 V is ~6% |
-| `readings` | array | yes (may be empty) | List of period records |
-| `errors` | array | no (default `[]`) | Device-side issues discovered while building the batch |
+| `readings` | array | yes (may be empty) | List of period records. Firmware includes at most `config::MaxUploadRecords` = **128** per POST |
+| `errors` | array | no (default `[]`) | Device-side issues discovered while building the batch. Firmware includes at most `config::MaxUploadErrors` = **8** entries |
 
 ### Reading object
 
@@ -80,7 +80,7 @@ Stable `code` values from firmware:
 | `no_data` | Zero unsynced readings after roll |
 | `crc_mismatch` | Bad CRC while scanning `/records.bin` (`detail` includes offset) |
 | `storage_unavailable` | LittleFS/storage not ready |
-| `batch_truncated` | More unsynced records than one upload batch |
+| `batch_truncated` | More unsynced records than one upload batch (`config::MaxUploadRecords` = **128**) |
 | `low_battery` | Protection lock was latched because pack voltage was below `BatteryRadioBlockVolts` (default **3.30**; firmware message: `protection lock from low battery`). Pending in `/brownout.dat` until attached on a POST that receives HTTP 200/201 (including an empty heartbeat). Not the same threshold as SoC 0% (empty-cliff **3.26 V**) |
 | `brownout_lock` | Protection lock was latched because last reset was `ESP_RST_BROWNOUT` (firmware message: `protection lock from brown-out reset`). Same pending/clear lifecycle as `low_battery`; both may appear together |
 

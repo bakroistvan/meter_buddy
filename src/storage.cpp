@@ -341,7 +341,7 @@ bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv) {
 bool loadUploadBatch(UploadBatch &batch) {
   batch = {};
   if (!initialized) {
-    if (batch.errorCount < MaxUploadErrors) {
+    if (batch.errorCount < config::MaxUploadErrors) {
       batch.errors[batch.errorCount].code = "storage_unavailable";
       batch.errors[batch.errorCount].detail[0] = '\0';
       ++batch.errorCount;
@@ -351,7 +351,7 @@ bool loadUploadBatch(UploadBatch &batch) {
 
   File file = LittleFS.open(RecordsFile, FILE_READ);
   if (!file) {
-    if (batch.errorCount < MaxUploadErrors) {
+    if (batch.errorCount < config::MaxUploadErrors) {
       batch.errors[batch.errorCount].code = "no_data";
       batch.errors[batch.errorCount].detail[0] = '\0';
       ++batch.errorCount;
@@ -364,7 +364,7 @@ bool loadUploadBatch(UploadBatch &batch) {
   if (file.size() >= sizeof(ReadingRecord) &&
       file.read(reinterpret_cast<uint8_t *>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
     if (record.crc != objectCrc(record)) {
-      if (batch.errorCount < MaxUploadErrors) {
+      if (batch.errorCount < config::MaxUploadErrors) {
         batch.errors[batch.errorCount].code = "crc_mismatch";
         snprintf(batch.errors[batch.errorCount].detail,
                  sizeof(batch.errors[batch.errorCount].detail),
@@ -389,7 +389,7 @@ bool loadUploadBatch(UploadBatch &batch) {
       }
     } else if (!file.seek(0)) {
       file.close();
-      if (batch.errorCount < MaxUploadErrors) {
+      if (batch.errorCount < config::MaxUploadErrors) {
         batch.errors[batch.errorCount].code = "storage_unavailable";
         batch.errors[batch.errorCount].detail[0] = '\0';
         ++batch.errorCount;
@@ -402,7 +402,7 @@ bool loadUploadBatch(UploadBatch &batch) {
 
   while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
     if (record.crc != objectCrc(record)) {
-      if (batch.errorCount < MaxUploadErrors) {
+      if (batch.errorCount < config::MaxUploadErrors) {
         batch.errors[batch.errorCount].code = "crc_mismatch";
         snprintf(batch.errors[batch.errorCount].detail,
                  sizeof(batch.errors[batch.errorCount].detail),
@@ -414,12 +414,12 @@ bool loadUploadBatch(UploadBatch &batch) {
     }
 
     if (record.sequence > syncedThrough) {
-      if (batch.count < MaxUploadRecords) {
+      if (batch.count < config::MaxUploadRecords) {
         batch.records[batch.count++] = record;
         batch.newestSequence = record.sequence;
       } else {
         batch.truncated = true;
-        if (batch.errorCount < MaxUploadErrors) {
+        if (batch.errorCount < config::MaxUploadErrors) {
           batch.errors[batch.errorCount].code = "batch_truncated";
           batch.errors[batch.errorCount].detail[0] = '\0';
           ++batch.errorCount;
@@ -497,12 +497,12 @@ void markProtectionPendingLowBattery() {
 }
 
 void attachPendingProtectionErrors(UploadBatch &batch) {
-  if (pendingBrownoutError && batch.errorCount < MaxUploadErrors) {
+  if (pendingBrownoutError && batch.errorCount < config::MaxUploadErrors) {
     batch.errors[batch.errorCount].code = "brownout_lock";
     batch.errors[batch.errorCount].detail[0] = '\0';
     ++batch.errorCount;
   }
-  if (pendingLowBatteryError && batch.errorCount < MaxUploadErrors) {
+  if (pendingLowBatteryError && batch.errorCount < config::MaxUploadErrors) {
     batch.errors[batch.errorCount].code = "low_battery";
     batch.errors[batch.errorCount].detail[0] = '\0';
     ++batch.errorCount;

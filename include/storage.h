@@ -1,11 +1,8 @@
 #pragma once
 
-#include <Arduino.h>
+#include "config.h"
 
 namespace storage {
-
-constexpr uint8_t MaxUploadRecords = 128;
-constexpr uint8_t MaxUploadErrors = 8;
 
 struct __attribute__((packed)) ReadingRecord {
   uint32_t sequence;
@@ -22,10 +19,10 @@ struct UploadError {
 };
 
 struct UploadBatch {
-  ReadingRecord records[MaxUploadRecords];
+  ReadingRecord records[config::MaxUploadRecords];
   uint8_t count;
   uint32_t newestSequence;
-  UploadError errors[MaxUploadErrors];
+  UploadError errors[config::MaxUploadErrors];
   uint8_t errorCount;
   bool truncated;
 };
