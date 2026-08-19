@@ -18,7 +18,7 @@ Firmware only advances its sync cursor on HTTP **200** or **201** after a batch 
 
 Unknown fields are rejected (`extra = forbid` on the backend). Empty `readings` are allowed (heartbeat / error-only upload).
 
-Firmware may omit optional keys entirely (not send `null`). When more than one POST is needed in a single upload wake (batches of ≤48 readings), top-level `battery_v` / `battery_pct_est` are included only on the **first** `sendBatch` of that session; follow-up truncated batches omit those keys.
+Firmware may omit optional keys entirely (not send `null`). When more than one POST is needed in a single upload wake (batches of **128** readings, `storage::MaxUploadRecords`), top-level `battery_v` / `battery_pct_est` are included only on the **first** `HttpSession::post` of that session; follow-up truncated batches omit those keys.
 
 ```json
 {
@@ -50,7 +50,7 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `device_id` | string | yes | 1–80 chars |
 | `meter_impulses_per_kwh` | int | yes | Must be `> 0` |
 | `upload_trigger` | string \| null | no | Firmware currently sends `"button"`; max 40 chars |
-| `battery_v` | float \| null | no | Top-level live sample; volts; `>= 0` if present. Firmware serializes with **3 decimal places** (`String(volts, 3)` in `buildBody`). Firmware may omit the key. On a real upload wake, filled from one `battery::sampleForRecord()` (Wi‑Fi forced off + settle) shared with the pre-upload roll, and only on the first POST of that multi-batch session; diagnostics `dump` preview uses immediate `sample()` |
+| `battery_v` | float \| null | no | Top-level live sample; volts; `>= 0` if present. Firmware serializes with **3 decimal places** (`snprintf` `%.3f` in `buildBody`). Firmware may omit the key. On a real upload wake, filled from one `battery::sampleForRecord()` (Wi‑Fi forced off + settle) shared with the pre-upload roll, and only on the first POST of that multi-batch session; diagnostics `dump` preview uses immediate `sample()` |
 | `battery_pct_est` | int \| null | no | Top-level estimate; 0–100 if present (same sample as `battery_v`). Firmware may omit the key with `battery_v`. Mapping is `battery::estimatePercent` (board-calibrated piecewise ADC-volt table: **≥ 4.05 V** rest after ETA4054 CV → 100%, **≤ 3.26 V** empty-cliff → 0%; loaded charge peaks ~4.12–4.18 V also clamp at 100%; not textbook 4.20/3.30 — see [fw_specification.md](../firmware/fw_specification.md) Battery ADC). Independent of protection hysteresis (`BatteryRadioBlockVolts` 3.30 / `BatteryRadioUnlockVolts` 3.50): 3.30 V is ~1% SoC, not 0%; 3.50 V is ~6% |
 | `readings` | array | yes (may be empty) | List of period records |
 | `errors` | array | no (default `[]`) | Device-side issues discovered while building the batch |
@@ -62,7 +62,7 @@ Firmware may omit optional keys entirely (not send `null`). When more than one P
 | `timestamp` | ISO-8601 datetime | yes | Period end (UTC `Z` from firmware) |
 | `period_start` | ISO-8601 datetime \| null | no | Period start |
 | `pulses` | int | yes | `>= 0` |
-| `battery_v` | float \| null | no | Volts from stored `ReadingRecord.batteryMv / 1000`; firmware always emits this on each reading, serialized with **3 decimal places** (`String(volts, 3)`). Backend still accepts omitted keys (clients that omit them stay omitted) |
+| `battery_v` | float \| null | no | Volts from stored `ReadingRecord.batteryMv / 1000`; firmware always emits this on each reading, serialized with **3 decimal places** (`snprintf` `%.3f`). Backend still accepts omitted keys (clients that omit them stay omitted) |
 | `battery_pct_est` | int \| null | no | 0–100 estimate recomputed via `battery::estimatePercent` from that same voltage; percent is **not** stored on disk. Firmware always emits this on each reading. Same board-calibrated piecewise ADC-volt table as top-level (**≥ 4.05 V** → 100%, **≤ 3.26 V** → 0%; interpolate between knots; firmware rounds to nearest int). Same independence from protection hysteresis as the top-level field |
 
 ### Error object
@@ -137,6 +137,6 @@ Set in `include/local_config.h` (or example defaults):
 
 ## Firmware body builder
 
-`upload::buildBody(batch, batteryReading)` / `sendBatch(batch, batteryReading)` in `include/upload.h` / `src/upload.cpp` take `const battery::Reading*`. When non-null, top-level `battery_v` / `battery_pct_est` are emitted (`battery_v` via `String(volts, 3)` — three decimal places); when `nullptr`, those keys are omitted. Readings serialize as `timestamp` / `period_start` / `pulses` / `battery_v` / `battery_pct_est` (`battery_v` from `record.batteryMv / 1000.0f` at 3 decimal places; `battery_pct_est` from `battery::estimatePercent` of that voltage). Pending `low_battery` / `brownout_lock` are attached by `storage::attachPendingProtectionErrors` before `sendBatch` and included in `errors[]`; they clear only after HTTP 200/201.
+`upload::buildBody(batch, batteryReading)` in `include/upload.h` / `src/upload.cpp` takes `const battery::Reading*`. When non-null, top-level `battery_v` / `battery_pct_est` are emitted (`battery_v` via `snprintf` `%.3f` — three decimal places); when `nullptr`, those keys are omitted. Timestamps are ISO-8601 UTC `Z` via `appendIso8601` (`strftime` into a stack buffer). Readings serialize as `timestamp` / `period_start` / `pulses` / `battery_v` / `battery_pct_est` (`battery_v` from `record.batteryMv / 1000.0f` at 3 decimal places; `battery_pct_est` from `battery::estimatePercent` of that voltage). Field names and types are unchanged. Pending `low_battery` / `brownout_lock` are attached by `storage::attachPendingProtectionErrors` before POST and included in `errors[]`; they clear only after HTTP 200/201.
 
-On a real upload wake, firmware calls `sampleForRecord()` once, uses that mV for `rollCurrentPeriod`, and passes `&reading` only to the first `sendBatch` of the session (`includeBattery`); follow-up truncated batches pass `nullptr`. The diagnostics REPL command `d` / `dump…` also uses `buildBody`, with `battery::sample()` passed for top-level fields — same encoder, without forcing Wi‑Fi off / settle, and without rolling or opening the network.
+The upload wake POSTs through one `upload::HttpSession` (HTTP keep-alive; TLS `WiFiClientSecure` only when `UploadUrl` is `https://`; `end()` before OTA). `sendBatch(batch, batteryReading)` is a one-shot wrapper that constructs its own `HttpSession` and calls `post`. On a real upload wake, firmware calls `sampleForRecord()` once, uses that mV for `rollCurrentPeriod`, and passes `&reading` only to the first `HttpSession::post` of the session (`includeBattery`); follow-up truncated batches pass `nullptr`. The diagnostics REPL command `d` / `dump…` also uses `buildBody`, with `battery::sample()` passed for top-level fields — same encoder, without forcing Wi‑Fi off / settle, and without rolling or opening the network.

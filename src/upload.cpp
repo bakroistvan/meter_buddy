@@ -4,6 +4,7 @@
 #include <HTTPUpdate.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <cstdio>
 #include <time.h>
 
 #include "config.h"
@@ -14,17 +15,23 @@ namespace upload {
 
 namespace {
 
-String iso8601(uint32_t unixTime) {
+void appendIso8601(String &out, uint32_t unixTime) {
   time_t raw = unixTime;
   tm timeinfo{};
   gmtime_r(&raw, &timeinfo);
 
-  char out[25];
-  strftime(out, sizeof(out), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-  return String(out);
+  char buf[25];
+  strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  out += buf;
 }
 
-String errorMessage(const char *code) {
+void appendFixed3(String &out, float value) {
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%.3f", static_cast<double>(value));
+  out += buf;
+}
+
+const char *errorMessage(const char *code) {
   if (strcmp(code, "no_data") == 0) {
     return "no unsynced readings";
   }
@@ -43,7 +50,7 @@ String errorMessage(const char *code) {
   if (strcmp(code, "brownout_lock") == 0) {
     return "protection lock from brown-out reset";
   }
-  return code != nullptr ? String(code) : String("unknown");
+  return code != nullptr ? code : "unknown";
 }
 
 void appendJsonEscaped(String &out, const char *text) {
@@ -65,7 +72,166 @@ void logEvent(const char *message) {
   }
 }
 
+void drainHttpResponse(HTTPClient &http) {
+  WiFiClient *stream = http.getStreamPtr();
+  if (stream == nullptr) {
+    return;
+  }
+  int remaining = http.getSize();
+  const uint32_t started = millis();
+  while (http.connected() && (millis() - started) < 2000) {
+    while (stream->available() > 0) {
+      stream->read();
+      if (remaining > 0) {
+        --remaining;
+      }
+    }
+    if (remaining <= 0 && !stream->available()) {
+      break;
+    }
+    delay(1);
+  }
+}
+
 } // namespace
+
+struct HttpSession::Impl {
+  WiFiClient *plain = nullptr;
+  WiFiClientSecure *tls = nullptr;
+  WiFiClient *client = nullptr;
+  HTTPClient http;
+  bool begun = false;
+};
+
+HttpSession::HttpSession() : impl_(new Impl()) {}
+
+HttpSession::~HttpSession() {
+  end();
+  delete impl_;
+  impl_ = nullptr;
+}
+
+void HttpSession::end() {
+  if (impl_ == nullptr) {
+    return;
+  }
+  impl_->http.setReuse(false);
+  if (impl_->begun) {
+    impl_->http.end();
+    impl_->begun = false;
+  }
+  delete impl_->tls;
+  impl_->tls = nullptr;
+  delete impl_->plain;
+  impl_->plain = nullptr;
+  impl_->client = nullptr;
+}
+
+bool HttpSession::ensureBegun() {
+  if (impl_ == nullptr) {
+    impl_ = new Impl();
+  }
+  if (impl_->begun && impl_->client != nullptr && impl_->client->connected()) {
+    return true;
+  }
+
+  end();
+
+  const bool useTls = strncmp(config::UploadUrl, "https://", 8) == 0;
+  if (useTls) {
+    impl_->tls = new WiFiClientSecure();
+    if (impl_->tls == nullptr) {
+      return false;
+    }
+    if (config::AllowInsecureTls) {
+      impl_->tls->setInsecure();
+    } else if (strlen(config::TlsCaCert) > 0) {
+      impl_->tls->setCACert(config::TlsCaCert);
+    } else {
+      logEvent("upload failed: tls not configured");
+      delete impl_->tls;
+      impl_->tls = nullptr;
+      return false;
+    }
+    impl_->client = impl_->tls;
+  } else {
+    impl_->plain = new WiFiClient();
+    if (impl_->plain == nullptr) {
+      return false;
+    }
+    impl_->client = impl_->plain;
+  }
+
+  impl_->http.setTimeout(config::HttpTimeoutMs);
+  impl_->http.setReuse(true);
+  if (!impl_->http.begin(*impl_->client, config::UploadUrl)) {
+    logEvent("upload failed: http begin");
+    end();
+    return false;
+  }
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload url=%s\n", config::UploadUrl);
+  }
+  impl_->begun = true;
+  return true;
+}
+
+Result HttpSession::post(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
+  if (!ensureWifiConnected()) {
+    return Result::WifiFailed;
+  }
+  if (!ensureBegun()) {
+    return Result::HttpFailed;
+  }
+
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload wifi rssi=%d\n", WiFi.RSSI());
+  }
+
+  impl_->http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
+  impl_->http.addHeader("Content-Type", "application/json");
+
+  const String body = buildBody(batch, batteryReading);
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload post start records=%u errors=%u bytes=%u\n",
+                  batch.count, batch.errorCount, body.length());
+  }
+
+  int status = impl_->http.POST(body);
+  if (status < 0) {
+    end();
+    if (!ensureWifiConnected()) {
+      return Result::WifiFailed;
+    }
+    if (!ensureBegun()) {
+      return Result::HttpFailed;
+    }
+    impl_->http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
+    impl_->http.addHeader("Content-Type", "application/json");
+    status = impl_->http.POST(body);
+  }
+
+  if (status < 0) {
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload http error=%d reason=%s\n", status, HTTPClient::errorToString(status).c_str());
+    }
+    end();
+    return Result::HttpFailed;
+  }
+
+  drainHttpResponse(impl_->http);
+
+  if (status == 200 || status == 201) {
+    if (config::EnableSerialLogs) {
+      Serial.printf("upload accepted status=%d\n", status);
+    }
+    return Result::Success;
+  }
+  if (config::EnableSerialLogs) {
+    Serial.printf("upload rejected status=%d\n", status);
+  }
+  return Result::ServerRejected;
+}
 
 bool disconnectWifiIfAllowed() {
   if (config::KeepWifiConnectedWhenAwake) {
@@ -78,7 +244,7 @@ bool disconnectWifiIfAllowed() {
 
 String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
   String body;
-  body.reserve(512 + batch.count * 140 + batch.errorCount * 80);
+  body.reserve(512 + static_cast<unsigned>(batch.count) * 140 + batch.errorCount * 80);
   body += "{\"device_id\":\"";
   body += config::DeviceId;
   body += "\",\"meter_impulses_per_kwh\":";
@@ -86,9 +252,9 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading *batt
   body += ",\"upload_trigger\":\"button\"";
   if (batteryReading != nullptr) {
     body += ",\"battery_v\":";
-    body += String(batteryReading->volts, 3);
+    appendFixed3(body, batteryReading->volts);
     body += ",\"battery_pct_est\":";
-    body += String(batteryReading->percent);
+    body += static_cast<unsigned>(batteryReading->percent);
   }
   body += ",\"readings\":[";
 
@@ -100,15 +266,15 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading *batt
     const uint32_t periodEnd = record.periodStart + config::RtcWakeIntervalSeconds;
     const float volts = record.batteryMv / 1000.0f;
     body += "{\"timestamp\":\"";
-    body += iso8601(periodEnd);
+    appendIso8601(body, periodEnd);
     body += "\",\"period_start\":\"";
-    body += iso8601(record.periodStart);
+    appendIso8601(body, record.periodStart);
     body += "\",\"pulses\":";
-    body += String(record.pulses);
+    body += record.pulses;
     body += ",\"battery_v\":";
-    body += String(volts, 3);
+    appendFixed3(body, volts);
     body += ",\"battery_pct_est\":";
-    body += String(battery::estimatePercent(volts));
+    body += static_cast<unsigned>(battery::estimatePercent(volts));
     body += "}";
   }
 
@@ -121,7 +287,7 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading *batt
     body += "{\"code\":\"";
     appendJsonEscaped(body, err.code);
     body += "\",\"message\":\"";
-    appendJsonEscaped(body, errorMessage(err.code).c_str());
+    appendJsonEscaped(body, errorMessage(err.code));
     body += "\"";
     if (err.detail[0] != '\0') {
       body += ",\"detail\":\"";
@@ -175,70 +341,8 @@ bool syncRtcFromNetwork() {
 }
 
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
-  if (!ensureWifiConnected()) {
-    return Result::WifiFailed;
-  }
-
-  // Use plain TCP for http://, TLS for https://
-  const bool useTls = strncmp(config::UploadUrl, "https://", 8) == 0;
-
-  WiFiClient *client;
-  WiFiClient plainClient;
-  WiFiClientSecure tlsClient;
-
-  if (useTls) {
-    if (config::AllowInsecureTls) {
-      tlsClient.setInsecure();
-    } else if (strlen(config::TlsCaCert) > 0) {
-      tlsClient.setCACert(config::TlsCaCert);
-    } else {
-      logEvent("upload failed: tls not configured");
-      return Result::HttpFailed;
-    }
-    client = &tlsClient;
-  } else {
-    client = &plainClient;
-  }
-
-  if (config::EnableSerialLogs) {
-    Serial.printf("upload url=%s\n", config::UploadUrl);
-    Serial.printf("upload wifi rssi=%d\n", WiFi.RSSI());
-  }
-
-  HTTPClient http;
-  http.setTimeout(config::HttpTimeoutMs);
-  if (!http.begin(*client, config::UploadUrl)) {
-    logEvent("upload failed: http begin");
-    return Result::HttpFailed;
-  }
-
-  http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
-  http.addHeader("Content-Type", "application/json");
-
-  const String body = buildBody(batch, batteryReading);
-  if (config::EnableSerialLogs) {
-    Serial.printf("upload post start records=%u errors=%u bytes=%u\n",
-                  batch.count, batch.errorCount, body.length());
-  }
-  const int status = http.POST(body);
-  http.end();
-
-  if (status < 0) {
-    if (config::EnableSerialLogs) {
-      Serial.printf("upload http error=%d reason=%s\n", status, HTTPClient::errorToString(status).c_str());
-    }
-    return Result::HttpFailed;
-  }
-  if (status == 200 || status == 201) {
-    if (config::EnableSerialLogs) {
-      Serial.printf("upload accepted status=%d\n", status);
-    }
-    return Result::Success;
-  }
-  if (config::EnableSerialLogs) {
-    Serial.printf("upload rejected status=%d\n", status);
-  }
-  return Result::ServerRejected;
+  HttpSession session;
+  return session.post(batch, batteryReading);
 }
 
 const char *resultName(Result result) {

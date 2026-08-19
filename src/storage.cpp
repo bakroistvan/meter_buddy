@@ -200,29 +200,6 @@ void hexdumpFile(Stream &stream, const char *path) {
   file.close();
 }
 
-void compactRecords() {
-  File file = LittleFS.open(RecordsFile, FILE_READ);
-  if (!file) return;
-
-  File tmp = LittleFS.open("/tmp_records.bin", FILE_WRITE);
-  if (!tmp) {
-    file.close();
-    return;
-  }
-
-  ReadingRecord record;
-  while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
-    if (record.sequence > syncedThrough) {
-      tmp.write(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord));
-    }
-  }
-  file.close();
-  tmp.close();
-
-  LittleFS.remove(RecordsFile);
-  LittleFS.rename("/tmp_records.bin", RecordsFile);
-}
-
 bool scanMinSequence(uint32_t &minSequence) {
   minSequence = 0;
 
@@ -266,6 +243,29 @@ void repairSyncState() {
 }
 
 } // namespace
+
+void compactRecords() {
+  File file = LittleFS.open(RecordsFile, FILE_READ);
+  if (!file) return;
+
+  File tmp = LittleFS.open("/tmp_records.bin", FILE_WRITE);
+  if (!tmp) {
+    file.close();
+    return;
+  }
+
+  ReadingRecord record;
+  while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
+    if (record.sequence > syncedThrough) {
+      tmp.write(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord));
+    }
+  }
+  file.close();
+  tmp.close();
+
+  LittleFS.remove(RecordsFile);
+  LittleFS.rename("/tmp_records.bin", RecordsFile);
+}
 
 bool begin() {
   if (!LittleFS.begin(true)) {
@@ -361,6 +361,45 @@ bool loadUploadBatch(UploadBatch &batch) {
 
   ReadingRecord record;
   size_t offset = 0;
+  if (file.size() >= sizeof(ReadingRecord) &&
+      file.read(reinterpret_cast<uint8_t *>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
+    if (record.crc != objectCrc(record)) {
+      if (batch.errorCount < MaxUploadErrors) {
+        batch.errors[batch.errorCount].code = "crc_mismatch";
+        snprintf(batch.errors[batch.errorCount].detail,
+                 sizeof(batch.errors[batch.errorCount].detail),
+                 "offset=%u",
+                 0u);
+        ++batch.errorCount;
+      }
+      file.close();
+      return true;
+    }
+    if (record.sequence <= syncedThrough) {
+      const uint32_t skip = syncedThrough - record.sequence + 1;
+      offset = static_cast<size_t>(skip) * sizeof(ReadingRecord);
+      if (offset >= file.size() || !file.seek(offset)) {
+        file.close();
+        if (batch.errorCount == 0) {
+          batch.errors[batch.errorCount].code = "no_data";
+          batch.errors[batch.errorCount].detail[0] = '\0';
+          ++batch.errorCount;
+        }
+        return true;
+      }
+    } else if (!file.seek(0)) {
+      file.close();
+      if (batch.errorCount < MaxUploadErrors) {
+        batch.errors[batch.errorCount].code = "storage_unavailable";
+        batch.errors[batch.errorCount].detail[0] = '\0';
+        ++batch.errorCount;
+      }
+      return true;
+    } else {
+      offset = 0;
+    }
+  }
+
   while (file.read(reinterpret_cast<uint8_t*>(&record), sizeof(ReadingRecord)) == sizeof(ReadingRecord)) {
     if (record.crc != objectCrc(record)) {
       if (batch.errorCount < MaxUploadErrors) {
@@ -407,7 +446,6 @@ bool markSyncedThrough(uint32_t sequence) {
   if (sequence > syncedThrough && sequence < nextSequence) {
     syncedThrough = sequence;
     saveSyncState();
-    compactRecords();
   }
   return true;
 }

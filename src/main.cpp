@@ -432,12 +432,10 @@ void handleUploadWake(bool force = false) {
   flushAwakePulses(true);
 
   logEvent("pre-roll");
-  storage::hexdump(Serial);
   const auto reading = battery::sampleForRecord();
   storage::rollCurrentPeriod(currentTimestamp(),
                              static_cast<uint16_t>(reading.volts * 1000.0f));
   logEvent("post-roll");
-  storage::hexdump(Serial);
 
   if (battery::evaluateProtectionLock(reading.volts, usbPowered())) {
     logEvent("upload blocked: protection lock");
@@ -458,6 +456,7 @@ void handleUploadWake(bool force = false) {
     uploadSucceeded = false;
   } else {
     upload::syncRtcFromNetwork();
+    upload::HttpSession session;
     while (true) {
       storage::UploadBatch batch{};
       if (!storage::loadUploadBatch(batch)) {
@@ -476,7 +475,7 @@ void handleUploadWake(bool force = false) {
                         batch.count, batch.errorCount);
         }
       }
-      const auto result = upload::sendBatch(batch, includeBattery ? &reading : nullptr);
+      const auto result = session.post(batch, includeBattery ? &reading : nullptr);
       includeBattery = false;
       if (config::EnableSerialLogs) {
         Serial.printf("upload result=%s records=%u errors=%u\n",
@@ -497,6 +496,11 @@ void handleUploadWake(bool force = false) {
         break;
       }
     }
+    session.end();
+  }
+
+  if (uploadedRecords) {
+    storage::compactRecords();
   }
 
   flushAwakePulses(true);

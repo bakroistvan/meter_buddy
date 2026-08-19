@@ -4,7 +4,7 @@
 
 namespace storage {
 
-constexpr uint8_t MaxUploadRecords = 48;
+constexpr uint8_t MaxUploadRecords = 128;
 constexpr uint8_t MaxUploadErrors = 8;
 
 struct __attribute__((packed)) ReadingRecord {
@@ -39,6 +39,7 @@ bool addPulses(uint32_t timestamp, uint32_t count);
 bool rollCurrentPeriod(uint32_t timestamp, uint16_t batteryMv);
 bool loadUploadBatch(UploadBatch &batch);
 bool markSyncedThrough(uint32_t sequence);
+void compactRecords();
 uint32_t unsyncedCount();
 bool stayAwakeBoot();
 bool setStayAwakeBoot(bool enabled);
