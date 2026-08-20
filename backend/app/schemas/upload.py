@@ -31,6 +31,8 @@ class UploadPayload(BaseModel):
     upload_trigger: str | None = Field(default=None, max_length=40)
     battery_v: float | None = Field(default=None, ge=0)
     battery_pct_est: int | None = Field(default=None, ge=0, le=100)
+    upload_session_id: str | None = Field(default=None, max_length=64)
+    last_batch: bool | None = None
     readings: list[MeterReading] = Field(default_factory=list)
     errors: list[UploadError] = Field(default_factory=list)
 

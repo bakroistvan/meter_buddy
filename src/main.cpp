@@ -463,6 +463,16 @@ void handleUploadWake(bool force = false) {
     uploadSucceeded = false;
   } else {
     upload::syncRtcFromNetwork();
+    // One upload_session_id for every POST in this wake (16 random bytes as hex).
+    char uploadSessionId[33];
+    static const char kHex[] = "0123456789abcdef";
+    for (int i = 0; i < 16; ++i) {
+      const uint8_t b = static_cast<uint8_t>(esp_random() & 0xffu);
+      uploadSessionId[i * 2] = kHex[(b >> 4) & 0x0f];
+      uploadSessionId[i * 2 + 1] = kHex[b & 0x0f];
+    }
+    uploadSessionId[32] = '\0';
+
     upload::HttpSession session;
     while (true) {
       storage::UploadBatch batch{};
@@ -482,11 +492,14 @@ void handleUploadWake(bool force = false) {
                         batch.count, batch.errorCount);
         }
       }
-      const auto result = session.post(batch, includeBattery ? &reading : nullptr);
+      const bool lastBatch = !batch.truncated;
+      const auto result =
+          session.post(batch, includeBattery ? &reading : nullptr, uploadSessionId, lastBatch);
       includeBattery = false;
       if (config::EnableSerialLogs) {
-        Serial.printf("upload result=%s records=%u errors=%u\n",
-                      upload::resultName(result), batch.count, batch.errorCount);
+        Serial.printf("upload result=%s records=%u errors=%u last_batch=%d\n",
+                      upload::resultName(result), batch.count, batch.errorCount,
+                      lastBatch ? 1 : 0);
       }
       if (result != upload::Result::Success) {
         uploadSucceeded = false;

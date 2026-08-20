@@ -5,6 +5,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <cstdio>
+#include <esp_system.h>
 #include <time.h>
 
 #include "config.h"
@@ -70,6 +71,17 @@ void logEvent(const char *message) {
   if (config::EnableSerialLogs) {
     Serial.println(message);
   }
+}
+
+// 16 random bytes → 32 hex chars + NUL. Same helper used by sendBatch ephemeral sessions.
+void fillEphemeralUploadSessionId(char out[33]) {
+  static const char kHex[] = "0123456789abcdef";
+  for (int i = 0; i < 16; ++i) {
+    const uint8_t b = static_cast<uint8_t>(esp_random() & 0xffu);
+    out[i * 2] = kHex[(b >> 4) & 0x0f];
+    out[i * 2 + 1] = kHex[b & 0x0f];
+  }
+  out[32] = '\0';
 }
 
 void drainHttpResponse(HTTPClient &http) {
@@ -176,7 +188,12 @@ bool HttpSession::ensureBegun() {
   return true;
 }
 
-Result HttpSession::post(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
+Result HttpSession::post(const storage::UploadBatch &batch, const battery::Reading *batteryReading,
+                         const char *uploadSessionId, bool lastBatch) {
+  if (uploadSessionId == nullptr || uploadSessionId[0] == '\0') {
+    logEvent("upload failed: missing upload_session_id");
+    return Result::HttpFailed;
+  }
   if (!ensureWifiConnected()) {
     return Result::WifiFailed;
   }
@@ -191,10 +208,11 @@ Result HttpSession::post(const storage::UploadBatch &batch, const battery::Readi
   impl_->http.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
   impl_->http.addHeader("Content-Type", "application/json");
 
-  const String body = buildBody(batch, batteryReading);
+  const String body = buildBody(batch, batteryReading, uploadSessionId, lastBatch);
   if (config::EnableSerialLogs) {
-    Serial.printf("upload post start records=%u errors=%u bytes=%u\n",
-                  batch.count, batch.errorCount, body.length());
+    Serial.printf("upload post start records=%u errors=%u bytes=%u session=%s last_batch=%d\n",
+                  batch.count, batch.errorCount, body.length(), uploadSessionId,
+                  lastBatch ? 1 : 0);
   }
 
   int status = impl_->http.POST(body);
@@ -242,7 +260,8 @@ bool disconnectWifiIfAllowed() {
   return true;
 }
 
-String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
+String buildBody(const storage::UploadBatch &batch, const battery::Reading *batteryReading,
+                 const char *uploadSessionId, bool lastBatch) {
   String body;
   body.reserve(512 + static_cast<unsigned>(batch.count) * 140 + batch.errorCount * 80);
   body += "{\"device_id\":\"";
@@ -250,6 +269,12 @@ String buildBody(const storage::UploadBatch &batch, const battery::Reading *batt
   body += "\",\"meter_impulses_per_kwh\":";
   body += config::MeterImpulsesPerKwh;
   body += ",\"upload_trigger\":\"button\"";
+  if (uploadSessionId != nullptr && uploadSessionId[0] != '\0') {
+    body += ",\"upload_session_id\":\"";
+    appendJsonEscaped(body, uploadSessionId);
+    body += "\",\"last_batch\":";
+    body += lastBatch ? "true" : "false";
+  }
   if (batteryReading != nullptr) {
     body += ",\"battery_v\":";
     appendFixed3(body, batteryReading->volts);
@@ -341,8 +366,10 @@ bool syncRtcFromNetwork() {
 }
 
 Result sendBatch(const storage::UploadBatch &batch, const battery::Reading *batteryReading) {
+  char uploadSessionId[33];
+  fillEphemeralUploadSessionId(uploadSessionId);
   HttpSession session;
-  return session.post(batch, batteryReading);
+  return session.post(batch, batteryReading, uploadSessionId, !batch.truncated);
 }
 
 const char *resultName(Result result) {

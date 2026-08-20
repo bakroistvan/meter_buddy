@@ -12,7 +12,7 @@ router = APIRouter(dependencies=[Depends(require_basic_auth)])
 
 @router.get("/dumps")
 def list_dumps_endpoint() -> list[dict]:
-    return [dict(row) for row in list_dumps()]
+    return list_dumps()
 
 
 @router.get("/dumps/{dump_id}/preview")

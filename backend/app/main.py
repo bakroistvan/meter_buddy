@@ -5,7 +5,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import routes_db, routes_dumps, routes_pages, routes_upload, routes_ws
+from app.api import (
+    routes_db,
+    routes_devices,
+    routes_dumps,
+    routes_pages,
+    routes_upload,
+    routes_ws,
+)
 from app.core.auth import validate_auth_config
 from app.db import init_db
 
@@ -40,6 +47,7 @@ def healthz() -> dict[str, bool]:
 
 app.include_router(routes_pages.router)
 app.include_router(routes_upload.router)
+app.include_router(routes_devices.router)
 app.include_router(routes_dumps.router)
 app.include_router(routes_db.router)
 app.include_router(routes_ws.router)

@@ -82,9 +82,15 @@ These two documents are normative for product requirements and firmware behavior
 
 | Doc | Description |
 | --- | --- |
-| [api/upload.md](api/upload.md) | Firmware ↔ backend upload contract |
+| [api/upload.md](api/upload.md) | Firmware ↔ backend upload contract; device `/api/devices` + `/state` + `/statistics`; WS dump meta |
+| [../custom_components/meter_buddy/README.md](../custom_components/meter_buddy/README.md) | HACS Home Assistant integration (install, config flow, Energy, wait-for-`last_batch`) |
+| [../tools/ha_catchup/README.md](../tools/ha_catchup/README.md) | Sparse upload-session payload generator + pytest; points at e2e sim |
 | [hardware/schematic.md](hardware/schematic.md) | Module schematic, nets, BOM, EasyEDA import notes |
 | [hardware/meter_buddy.netlist.json](hardware/meter_buddy.netlist.json) | EasyEDA Pro netlist-rebuild import |
+
+### E2E HA catch-up sim
+
+Firmware-like multi-batch upload through backend statistics into the HA mapper stub lives in [backend/tests/test_sim_ha_catchup.py](../backend/tests/test_sim_ha_catchup.py) (uses [tools/ha_catchup](../tools/ha_catchup/README.md)).
 
 Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md) and [api/upload.md](api/upload.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md) and [hardware/schematic.md](hardware/schematic.md).
 
@@ -92,6 +98,8 @@ Monorepo/backend layout formerly described in `architecture.md` is historical; c
 
 - [Root README](../README.md) — hardware overview, firmware build/flash
 - [Backend README](../backend/README.md) — API server setup, Docker, tests
+- [HACS integration README](../custom_components/meter_buddy/README.md) — Home Assistant Energy sensors
+- [HA catch-up tool README](../tools/ha_catchup/README.md) — generate sparse upload batches for sims
 
 ## Archive
 

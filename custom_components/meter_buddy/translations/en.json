@@ -1,0 +1,31 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Meter Buddy backend",
+        "description": "Connect to your Meter Buddy backend (Basic Auth).",
+        "data": {
+          "base_url": "Backend base URL",
+          "username": "Username",
+          "password": "Password"
+        }
+      },
+      "device": {
+        "title": "Select device",
+        "description": "Choose which logger to track in Home Assistant.",
+        "data": {
+          "device_id": "Device"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the backend",
+      "invalid_auth": "Invalid username or password",
+      "invalid_url": "Enter a full URL starting with http:// or https://",
+      "no_devices": "No devices found on the backend"
+    },
+    "abort": {
+      "already_configured": "This device is already configured"
+    }
+  }
+}

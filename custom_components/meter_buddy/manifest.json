@@ -1,0 +1,11 @@
+{
+  "domain": "meter_buddy",
+  "name": "Meter Buddy",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/meter-buddy/meter_buddy",
+  "iot_class": "cloud_push",
+  "issue_tracker": "https://github.com/meter-buddy/meter_buddy/issues",
+  "requirements": ["aiohttp"],
+  "version": "0.1.0"
+}

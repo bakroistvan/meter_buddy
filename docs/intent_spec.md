@@ -14,7 +14,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 
 1. The device attaches to a utility electricity meter and records energy use by counting the meter’s optical pulses.
 2. It runs unattended for long periods on battery, with rare manual interaction.
-3. Recorded consumption is uploaded to a backend for storage and analysis when the user requests it.
+3. Recorded consumption is uploaded to a backend for storage, analysis, and home-automation energy views when the user requests it.
 
 ---
 
@@ -88,6 +88,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | P-6 | An empty successful heartbeat (nothing to upload) is allowed and is not treated as a user-facing failure. |
 | P-7 | Upload attempts may report storage/integrity problems and protection events (low battery / brown-out lock) alongside readings so the backend and operator can see device health. |
 | P-8 | After a successful upload that delivered readings, the device may check for a newer firmware image before releasing the upload network session, when connectivity still allows it. |
+| P-9 | When an upload wake needs more than one network POST, every POST of that wake must share one session identity, and the final POST must be marked complete so a backend consumer can wait until the wake is finished before treating historical energy as ready. |
 
 ---
 
@@ -106,11 +107,12 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 
 | ID | Requirement |
 | --- | --- |
-| N-1 | No on-device display; the backend is the primary data consumer. |
+| N-1 | No on-device display; the backend is the primary data store. Home automation (Energy dashboard and live power/energy sensors) must consume from the backend after an upload session is complete — not by talking to the device or inventing mid-session history. |
 | N-2 | Single meter, single optical sensor. |
 | N-3 | Unacknowledged committed records must be retained on-device **indefinitely until a successful upload acknowledges them**. Flash capacity is a practical limit; the device must not silently discard unacked records to free space. |
 | N-4 | **USB flashing is the primary** way to install firmware. **Network OTA is allowed** as an optional step after a successful data upload when connectivity still permits it — not forbidden. |
 | N-5 | The backend must serve device ingest and all operator UI/admin endpoints over **HTTPS** with **authenticated** access; only a dedicated unauthenticated liveness probe (e.g. `GET /healthz`) is exempt. |
+| N-6 | The backend must expose authenticated device list, live energy/power state, and preaggregated historical statistics (including idle intervals as zero power with cumulative energy carried forward) so a home-automation integration can import Energy history without recomputing sparse pulses itself. |
 
 ---
 
@@ -130,6 +132,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |
 | P-8 / N-4 | After successful upload with readings, OTA check may run before the upload network session is released; USB flash remains a valid install path. |
-| N-5 | Upload ingest, dump browser UI, dump JSON, `/db`, and live WebSocket require HTTPS + credentials; `/healthz` alone is unauthenticated. |
+| P-9 / N-1 / N-6 | Multi-batch upload shares one session id with a final complete mark; HA (or similar) waits for that mark (or timeout), then pulls absolute live energy and 0-filled statistics from the backend — not from the device. |
+| N-5 | Upload ingest, dump browser UI, dump JSON, `/db`, device APIs, and live WebSocket require HTTPS + credentials; `/healthz` alone is unauthenticated. |
 
 When firmware behavior and [fw_specification.md](firmware/fw_specification.md) disagree with this intent, **intent wins for product decisions**; when they disagree only on how something is implemented, **fw_specification + code** win until intent is consciously revised.
