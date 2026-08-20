@@ -83,6 +83,7 @@ These two documents are normative for product requirements and firmware behavior
 | Doc | Description |
 | --- | --- |
 | [api/upload.md](api/upload.md) | Firmware ↔ backend upload contract; device `/api/devices` + `/state` + `/statistics`; WS dump meta |
+| [api/firmware.md](api/firmware.md) | Firmware ↔ backend OTA / HTTPUpdate contract + mirror operator routes |
 | [../deploy/README.md](../deploy/README.md) | Production deploy: compose + `.env` only (GHCR images) |
 | [../custom_components/meter_buddy/README.md](../custom_components/meter_buddy/README.md) | HACS Home Assistant integration (install, config flow, Energy, wait-for-`last_batch`) |
 | [../tools/ha_catchup/README.md](../tools/ha_catchup/README.md) | Sparse upload-session payload generator + pytest; points at e2e sim |
@@ -93,7 +94,7 @@ These two documents are normative for product requirements and firmware behavior
 
 Firmware-like multi-batch upload through backend statistics into the HA mapper stub lives in [backend/tests/test_sim_ha_catchup.py](../backend/tests/test_sim_ha_catchup.py) (uses [tools/ha_catchup](../tools/ha_catchup/README.md)).
 
-Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md) and [api/upload.md](api/upload.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md) and [hardware/schematic.md](hardware/schematic.md).
+Monorepo/backend layout formerly described in `architecture.md` is historical; current backend setup lives in [backend/README.md](../backend/README.md), [api/upload.md](api/upload.md), and [api/firmware.md](api/firmware.md). Hardware build detail beyond the fw_specification assumptions is also summarized in the [root README](../README.md) and [hardware/schematic.md](hardware/schematic.md).
 
 ## Package READMEs
 

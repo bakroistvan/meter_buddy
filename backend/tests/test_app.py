@@ -359,6 +359,8 @@ def test_protected_routes_require_auth(tmp_path, monkeypatch):
         assert client.get("/").status_code == 401
         assert client.get("/dumps").status_code == 401
         assert client.get("/db").status_code == 401
+        assert client.get("/api/meter-buddy/firmware").status_code == 401
+        assert client.get("/api/meter-buddy/firmware/version").status_code == 401
         assert client.get("/healthz").status_code == 200
         assert client.get("/healthz").json() == {"ok": True}
         try:

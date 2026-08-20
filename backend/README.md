@@ -83,7 +83,9 @@ Compose starts:
 - **backend** — Compose network only; non-root; `read_only` + dropped capabilities
 
 UI: `https://changeme.duckdns.org:9111/` (Basic Auth).  
-Upload: `https://changeme.duckdns.org:9111/api/meter-buddy/upload`.
+Upload: `https://changeme.duckdns.org:9111/api/meter-buddy/upload`.  
+Firmware OTA (device): `https://changeme.duckdns.org:9111/api/meter-buddy/firmware/version` — see [docs/api/firmware.md](../docs/api/firmware.md).  
+GitHub release mirror token: [GITHUB_TOKEN.md](GITHUB_TOKEN.md).
 
 There is no public HTTP redirect (port 80 not published). Always use `https://…:9111`.
 
@@ -107,6 +109,7 @@ Leaf certificates renew automatically via Caddy. Firmware must pin the **ISRG ro
 1. Deploy Compose as above; confirm `https://changeme.duckdns.org:9111/` prompts for Basic Auth.
 2. In `include/local_config.h` (from `config.example.h`):
    - `UploadUrl = "https://changeme.duckdns.org:9111/api/meter-buddy/upload"`
+   - `FirmwareVersionUrl = "https://changeme.duckdns.org:9111/api/meter-buddy/firmware/version"`
    - Matching `BasicAuthUser` / `BasicAuthPassword`
    - `#include "certs/isrg_roots.h"` and `TlsCaCert = IsrgRootCerts` (vendored X1 + X2)
    - `AllowInsecureTls = false`
@@ -132,8 +135,23 @@ Environment variables:
 - `METER_BUDDY_DOMAIN` — DuckDNS hostname (e.g. `changeme.duckdns.org`)
 - `DUCKDNS_TOKEN` — DuckDNS API token for Let’s Encrypt DNS-01
 - `METER_BUDDY_HTTPS_PORT` — host HTTPS port (default `9111`; router forwards this port)
+- `METER_BUDDY_GITHUB_REPO` — GitHub `owner/repo` to mirror (default `bakroistvan/meter_buddy`)
+- `METER_BUDDY_GITHUB_TOKEN` — optional fine-grained PAT; see [GITHUB_TOKEN.md](GITHUB_TOKEN.md)
+- `METER_BUDDY_FIRMWARE_DIR` — mirrored `.bin` + `manifest.json` (Docker default `/data/firmware`)
+- `METER_BUDDY_FIRMWARE_SYNC_INTERVAL_SEC` — poll interval (default `86400` = 1 day); startup always syncs once
+- `METER_BUDDY_FIRMWARE_DISABLE_SYNC` — `1` to skip background poll (tests)
 
 All HTTP routes and `/ws` require Basic Auth except `/healthz`.
+
+### Firmware mirror endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/meter-buddy/firmware/version` | Device OTA (`HTTPUpdate`: `304` / `200` `.bin` + `x-MD5` / `503` if cache empty) — not a JSON document |
+| `GET` | `/api/meter-buddy/firmware` | Operator: mirrored tags, md5, last sync status |
+| `POST` | `/api/meter-buddy/firmware/sync` | Operator: pull GitHub Releases now (`502` on sync failure) |
+
+Contract: [docs/api/firmware.md](../docs/api/firmware.md). Token setup: [GITHUB_TOKEN.md](GITHUB_TOKEN.md).
 
 ## Example Upload
 
@@ -168,3 +186,13 @@ curl -i \
 python -m pip install -r backend/requirements-dev.txt
 python -m pytest -q backend
 ```
+
+Firmware unit tests mock GitHub. To exercise a real Releases download (latest `meter-buddy-fw-v*.bin`):
+
+```powershell
+$env:METER_BUDDY_LIVE_GITHUB="1"
+# Optional: $env:METER_BUDDY_GITHUB_TOKEN="github_pat_..."
+.\.venv\Scripts\python -m pytest -q tests/test_firmware.py -m live_github
+```
+
+Without `METER_BUDDY_LIVE_GITHUB=1`, the live test is skipped.

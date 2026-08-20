@@ -22,7 +22,8 @@ constexpr uint8_t MaxUploadRecords = 128;
 constexpr uint8_t MaxUploadErrors = 8;
 // HTTPS URL used by HTTP OTA after a successful upload session.
 constexpr const char *FirmwareVersionUrl = "https://example.com/api/meter-buddy/firmware/version";
-// Current firmware version string sent to the OTA endpoint (skip update if already this).
+// Fallback OTA current-version when PlatformIO pre-script did not inject FIRMWARE_VERSION (no git).
+// Tagged CI builds embed the git tag via script/pio_firmware_version.py.
 constexpr const char *FirmwareVersion = "1.0.0";
 // HTTP Basic Auth username for upload and OTA. Must match backend METER_BUDDY_AUTH_USER.
 constexpr const char *BasicAuthUser = "meter-buddy";
@@ -39,6 +40,7 @@ constexpr bool AllowInsecureTls = false;
 constexpr uint32_t WifiConnectTimeoutMs = 30000;
 // HTTP client timeout for each upload POST.
 constexpr uint32_t HttpTimeoutMs = 20000;
+constexpr uint32_t OtaTimeoutMs = 120000;
 
 // Primary NTP host after Wi-Fi connects (sets system time and DS3231).
 constexpr const char *NtpServer1 = "pool.ntp.org";

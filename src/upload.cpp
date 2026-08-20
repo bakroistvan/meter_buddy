@@ -412,7 +412,15 @@ void checkFirmwareUpdate() {
     client = &plainClient;
   }
 
-  t_httpUpdate_return ret = httpUpdate.update(*client, config::FirmwareVersionUrl, config::FirmwareVersion);
+#if defined(FIRMWARE_VERSION)
+  const char *currentVersion = FIRMWARE_VERSION;
+#else
+  const char *currentVersion = config::FirmwareVersion;
+#endif
+
+  httpUpdate.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
+  httpUpdate.setTimeout(config::OtaTimeoutMs);
+  t_httpUpdate_return ret = httpUpdate.update(*client, config::FirmwareVersionUrl, currentVersion);
   
   if (config::EnableSerialLogs) {
     switch (ret) {

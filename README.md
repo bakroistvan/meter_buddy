@@ -122,7 +122,8 @@ esptool.py --chip esp32c3 --port COM5 --baud 460800 write_flash 0x0 meter-buddy-
 2. Create and push a semver tag: `v<major>.<minor>.<patch>` (for example `v1.2.3`). The build workflow runs on `v*` tags.
 3. Wait for [Build firmware](.github/workflows/build-firmware.yml) to finish; it smoke-checks that each file under `dist/` contains the resolved version string.
 4. Confirm the GitHub Release assets use the `meter-buddy-fw-<version>.*` names above (not bare `firmware.bin`).
-5. Optionally bump `config::FirmwareVersion` in `include/local_config.h` / `config.example.h` so OTA current-version reporting matches the tag; release asset naming always comes from the git tag, not that constant.
+5. OTA current-version reporting is injected at build time from `git describe` via [`script/pio_firmware_version.py`](script/pio_firmware_version.py) (`FIRMWARE_VERSION`). No manual bump of `config::FirmwareVersion` is required for tagged builds. Units still flashing an old binary that reports a dummy `1.0.0` need one USB flash before OTA version comparison works.
+6. After publishing a release, either wait for the backend’s daily GitHub mirror poll or `POST /api/meter-buddy/firmware/sync` so devices can pull the new `.bin` (see [docs/api/firmware.md](docs/api/firmware.md)).
 
 ## Upload Flow
 
