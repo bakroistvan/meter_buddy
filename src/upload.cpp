@@ -418,14 +418,18 @@ void checkFirmwareUpdate() {
   const char *currentVersion = config::FirmwareVersion;
 #endif
 
-  httpUpdate.setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
-  httpUpdate.setTimeout(config::OtaTimeoutMs);
-  t_httpUpdate_return ret = httpUpdate.update(*client, config::FirmwareVersionUrl, currentVersion);
-  
+  // Arduino-ESP32 2.x: timeout via HTTPUpdate ctor; Basic Auth via request callback
+  // (setAuthorization/setTimeout on HTTPUpdate arrived in core 3.x).
+  HTTPUpdate updater(static_cast<int>(config::OtaTimeoutMs));
+  t_httpUpdate_return ret = updater.update(
+      *client, config::FirmwareVersionUrl, currentVersion, [](HTTPClient *http) {
+        http->setAuthorization(config::BasicAuthUser, config::BasicAuthPassword);
+      });
+
   if (config::EnableSerialLogs) {
     switch (ret) {
       case HTTP_UPDATE_FAILED:
-        Serial.printf("ota failed Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+        Serial.printf("ota failed Error (%d): %s\n", updater.getLastError(), updater.getLastErrorString().c_str());
         break;
       case HTTP_UPDATE_NO_UPDATES:
         Serial.println("ota no updates");

@@ -20,7 +20,7 @@ Operator token / GitHub PAT setup: [backend/GITHUB_TOKEN.md](../../backend/GITHU
 | Success (newer image) | `200 OK`, `Content-Type: application/octet-stream`, response header `x-MD5: <hex>`, body = mirrored `.bin` |
 | Unavailable | `503 Service Unavailable` — empty mirror, invalid latest tag, or missing file on disk |
 
-Firmware also sets `httpUpdate.setAuthorization(BasicAuthUser, BasicAuthPassword)` and `httpUpdate.setTimeout(OtaTimeoutMs)` (default **120000** ms). TLS trust matches upload (`TlsCaCert` / `AllowInsecureTls`).
+Firmware constructs `HTTPUpdate(OtaTimeoutMs)` (default **120000** ms) and passes a request callback that calls `HTTPClient::setAuthorization(BasicAuthUser, BasicAuthPassword)` (Arduino-ESP32 2.x API). TLS trust matches upload (`TlsCaCert` / `AllowInsecureTls`).
 
 Reverse proxies in front of the backend should allow long downloads (Compose Caddy uses **120s** `read_timeout` / `write_timeout` on the reverse proxy).
 
