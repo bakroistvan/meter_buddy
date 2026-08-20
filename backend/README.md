@@ -18,8 +18,8 @@ backend/
 │   └── templates/
 ├── tests/
 ├── data/                 # local SQLite (gitignored content)
-├── Caddyfile             # Let's Encrypt (DuckDNS DNS-01) reverse proxy
-├── docker-compose.yml
+├── Caddyfile             # baked into Caddy image (DuckDNS DNS-01)
+├── docker-compose.yml    # source-build stack (maintainers)
 ├── Dockerfile            # FastAPI backend
 ├── Dockerfile.caddy      # Caddy + caddy-dns/duckdns
 ├── .env.example          # copy to .env for Compose
@@ -51,13 +51,19 @@ $env:METER_BUDDY_ALLOW_INSECURE_AUTH="1"
 
 Open `http://127.0.0.1:8000/` (browser prompts for Basic Auth). Liveness: `GET /healthz` (no auth).
 
+## Production deploy (images only)
+
+**Preferred:** copy [`deploy/docker-compose.yml`](../deploy/docker-compose.yml) and [`.env.example`](../deploy/.env.example) to any Docker host — no repo clone. Procedure: [deploy/README.md](../deploy/README.md).
+
 ## Running with Docker / Docker Compose (HTTPS + DuckDNS)
 
 Step-by-step cutover: [MIGRATION_HTTPS.md](MIGRATION_HTTPS.md).
 
 **Typical home setup:** DuckDNS name (e.g. `changeme.duckdns.org`) → your public IP; router port-forwards **WAN TCP 9111 → LAN host:9111**. Certs use **Let’s Encrypt DNS-01** via your DuckDNS token — **port 80 is not required**.
 
-From **`backend/`**:
+### Source build (maintainers)
+
+From **`backend/`** (builds images locally; Caddyfile is baked into the Caddy image):
 
 ```bash
 cp .env.example .env
@@ -81,7 +87,7 @@ Upload: `https://changeme.duckdns.org:9111/api/meter-buddy/upload`.
 
 There is no public HTTP redirect (port 80 not published). Always use `https://…:9111`.
 
-To run a pre-built image behind your own TLS proxy:
+To run a pre-built backend image behind your own TLS proxy:
 
 ```bash
 docker run --rm \
@@ -89,7 +95,7 @@ docker run --rm \
   -e METER_BUDDY_AUTH_PASSWORD='your-secret' \
   -e METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3 \
   -v meter_buddy_data:/data \
-  ghcr.io/<owner>/meter_buddy:latest
+  ghcr.io/bakroistvan/meter_buddy:latest
 ```
 
 The Dockerfile does **not** bake auth credentials into the image.
