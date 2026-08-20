@@ -48,13 +48,23 @@ curl -o meter_buddy_backup.sqlite3 http://127.0.0.1:8000/db
 
 ---
 
-## 2. Pull hardened code
+## 2. Prefer image deploy (compose + `.env`)
 
-- [ ] Repo includes `Dockerfile`, `Dockerfile.caddy`, `docker-compose.yml`, `Caddyfile`, `.env.example`
+**Recommended:** follow [deploy/README.md](../deploy/README.md) — only `deploy/docker-compose.yml` and a filled `.env` on the host (pulls GHCR images). No repo clone.
+
+**Source build alternative:** clone the repo so `backend/` includes `Dockerfile`, `Dockerfile.caddy`, `docker-compose.yml`, `Caddyfile`, `.env.example`, then use the steps below from `backend/`.
 
 ---
 
 ## 3. Create `.env`
+
+**Image deploy** (from the directory with `deploy/docker-compose.yml`):
+
+```bash
+cp .env.example .env
+```
+
+**Source build** (from `backend/`):
 
 ```bash
 cd backend
@@ -82,6 +92,16 @@ METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3
 
 ## 4. Start stack
 
+**Image deploy:**
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs -f caddy
+```
+
+**Source build** (from `backend/`):
+
 ```bash
 cd backend
 docker compose up --build -d
@@ -89,7 +109,7 @@ docker compose ps
 docker compose logs -f caddy
 ```
 
-First build compiles Caddy with the DuckDNS plugin (slow once).
+First source build compiles Caddy with the DuckDNS plugin (slow once). Image deploy pulls pre-built images instead.
 
 - [ ] Both services running
 - [ ] Caddy log shows certificate obtained (DNS-01; may take 1–2 minutes)
@@ -142,7 +162,7 @@ In `include/local_config.h`:
 
 ## Rollback
 
-1. `docker compose down` in `backend/`
+1. `docker compose down` (in the deploy directory or `backend/`)
 2. Temporarily run old `:8000` / local uvicorn with `METER_BUDDY_ALLOW_INSECURE_AUTH=1` on LAN only
 3. Point firmware back at `http://…` only for that window
 4. Keep `backend_data` volume unless you intentionally wipe it
@@ -152,7 +172,7 @@ In `include/local_config.h`:
 ## Quick verify
 
 ```bash
-cd backend
+# From the directory that has docker-compose.yml and .env
 set -a && source .env && set +a
 
 curl -fsS "https://${METER_BUDDY_DOMAIN}:${METER_BUDDY_HTTPS_PORT}/healthz"

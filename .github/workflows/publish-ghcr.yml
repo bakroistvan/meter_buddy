@@ -30,7 +30,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push Docker image
+      - name: Build and push backend image
         uses: docker/build-push-action@v7
         with:
           context: ./backend
@@ -41,5 +41,19 @@ jobs:
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.sha }}
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and push Caddy image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.caddy
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}-caddy:latest
+            ghcr.io/${{ github.repository }}-caddy:${{ github.sha }}
+            ghcr.io/${{ github.repository }}-caddy:${{ github.ref_name }}
+          cache-from: type=gha,scope=caddy
+          cache-to: type=gha,mode=max,scope=caddy

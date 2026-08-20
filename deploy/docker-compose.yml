@@ -1,24 +1,28 @@
-# Environment: copy .env.example → .env and edit (Compose loads .env automatically).
-#   cp .env.example .env
+# Meter Buddy production stack — compose + .env only (no repo clone required).
+#
+#   cp .env.example .env   # then edit
+#   docker compose up -d
+#
+# Prefer pinning image tags to a release (e.g. :v0.5.0) instead of :latest.
+# Images: https://github.com/bakroistvan/meter_buddy/pkgs/container/meter_buddy
 #
 # Host: only HTTPS on METER_BUDDY_HTTPS_PORT (default 9111).
 # Router: port-forward WAN TCP 9111 → this host:9111.
 # ACME: DuckDNS DNS-01 (DUCKDNS_TOKEN) — port 80 not required.
+# Packages must be public, or run: docker login ghcr.io
 
 services:
   caddy:
-    build:
-      context: .
-      dockerfile: Dockerfile.caddy
+    # Prefer a release tag, e.g. ghcr.io/bakroistvan/meter_buddy-caddy:v0.5.0
+    image: ghcr.io/bakroistvan/meter_buddy-caddy:latest
     ports:
-      # Caddy https_port is 9111 in-container (see Caddyfile); keep host port configurable.
+      # Caddy https_port is 9111 in-container (baked Caddyfile); host port configurable.
       - "${METER_BUDDY_HTTPS_PORT:-9111}:9111"
     env_file:
       - .env
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-
     networks:
       - meter_buddy
     depends_on:
@@ -26,9 +30,8 @@ services:
     restart: unless-stopped
 
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Prefer a release tag, e.g. ghcr.io/bakroistvan/meter_buddy:v0.5.0
+    image: ghcr.io/bakroistvan/meter_buddy:latest
     env_file:
       - .env
     volumes:
