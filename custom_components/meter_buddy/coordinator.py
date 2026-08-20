@@ -191,12 +191,21 @@ class MeterBuddyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hourly: dict[str, Any],
         five_min: dict[str, Any],
     ) -> None:
-        """Call async_import_statistics when entity_ids and recorder are available."""
+        """Import hour → LTS and 5min → STS into the recorder.
+
+        Public ``async_import_statistics`` only accepts top-of-hour rows (LTS).
+        5-minute rows go to ``statistics_short_term`` via the recorder instance
+        import path (same job used internally when the table arg is ShortTerm).
+        """
         if not self._energy_entity_id or not self._power_entity_id:
             _LOGGER.debug("Skipping statistics import; entity_ids not bound yet")
             return
 
         try:
+            from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+            from homeassistant.components.recorder.db_schema import (  # noqa: PLC0415
+                StatisticsShortTerm,
+            )
             from homeassistant.components.recorder.statistics import (  # noqa: PLC0415
                 async_import_statistics,
             )
@@ -206,22 +215,48 @@ class MeterBuddyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         hour_buckets = list(hourly.get("buckets") or [])
         five_buckets = list(five_min.get("buckets") or [])
-        for buckets, label in (
-            (hour_buckets, "hour"),
-            (five_buckets, "5min"),
-        ):
-            if not buckets:
-                continue
+
+        if hour_buckets:
             energy_meta, energy_stats = map_energy_statistics(
-                self._energy_entity_id, buckets, name=f"Meter Buddy energy ({label})"
+                self._energy_entity_id,
+                hour_buckets,
+                name="Meter Buddy energy",
+                align="hour",
             )
             power_meta, power_stats = map_power_statistics(
-                self._power_entity_id, buckets, name=f"Meter Buddy power ({label})"
+                self._power_entity_id,
+                hour_buckets,
+                name="Meter Buddy power",
+                align="hour",
             )
             if energy_stats:
                 async_import_statistics(self.hass, energy_meta, energy_stats)
             if power_stats:
                 async_import_statistics(self.hass, power_meta, power_stats)
+
+        if five_buckets:
+            energy_meta, energy_stats = map_energy_statistics(
+                self._energy_entity_id,
+                five_buckets,
+                name="Meter Buddy energy",
+                align="5min",
+            )
+            power_meta, power_stats = map_power_statistics(
+                self._power_entity_id,
+                five_buckets,
+                name="Meter Buddy power",
+                align="5min",
+            )
+            recorder = get_instance(self.hass)
+            # Materialize lists: the recorder queue may consume later on its thread.
+            if energy_stats:
+                recorder.async_import_statistics(
+                    energy_meta, list(energy_stats), StatisticsShortTerm
+                )
+            if power_stats:
+                recorder.async_import_statistics(
+                    power_meta, list(power_stats), StatisticsShortTerm
+                )
 
     @staticmethod
     def _watermark_from_buckets(buckets: list[dict[str, Any]]) -> str | None:

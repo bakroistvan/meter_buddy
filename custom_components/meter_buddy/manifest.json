@@ -7,5 +7,5 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/meter-buddy/meter_buddy/issues",
   "requirements": ["aiohttp"],
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

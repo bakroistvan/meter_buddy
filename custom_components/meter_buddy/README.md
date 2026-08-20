@@ -75,7 +75,7 @@ Upload wakes may POST many batches of up to **128** readings. HA must not import
 
 | Trigger | Behavior |
 | --- | --- |
-| First setup | Immediate full import: `GET …/statistics` (hour + 5min, no watermark) + `GET …/state`; push into recorder via `async_import_statistics` |
+| First setup | Immediate full import: `GET …/statistics` (`hour` + `5min`, no watermark) + `GET …/state`; push into recorder |
 | WebSocket `new_dump` with `last_batch: false` | Record session id; **wait** (do not import); restart **60 s** timeout (`SESSION_COMPLETE_TIMEOUT_SECONDS`) |
 | WebSocket `new_dump` with `last_batch: true` (or missing/`null` treated as complete) | Cancel timeout; one import under a lock |
 | 60 s timeout while waiting | Import whatever the backend already has for that session |
@@ -86,8 +86,12 @@ Each import:
 
 1. `GET /api/devices/{id}/statistics?bucket=hour` and `bucket=5min` (optional `since=` watermark after the first full import).
 2. `GET /api/devices/{id}/state`.
-3. Map buckets to HA statistics rows (`sum` = cumulative `energy_kwh_sum` for energy; mean power for power) and call `async_import_statistics` for both entities.
-4. Set live sensor values; advance watermark to the latest bucket `start`.
+3. Map buckets and write into the recorder:
+   - **Hour** → long-term statistics via public `async_import_statistics` (top-of-hour only).
+   - **5 min** → short-term statistics (`statistics_short_term`) via the recorder instance import path (HA has no public 5‑minute import API).
+4. Set live sensor values; advance watermark to the latest bucket `start` (hour or 5 min).
+
+**Retention note:** HA purges short-term statistics with the recorder history window (default ~10 days). Hourly long-term statistics are kept permanently. After purge, only hourly resolution remains for older periods.
 
 Live energy always overwrites from `/state.energy_kwh` (absolute), matching `session.apply_absolute_energy`.
 

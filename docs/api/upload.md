@@ -122,7 +122,7 @@ Every backend route requires HTTP Basic Auth (`METER_BUDDY_AUTH_USER` / `METER_B
 | `POST` | `/api/meter-buddy/upload` | Basic | Device ingest (this contract) |
 | `GET` | `/api/devices` | Basic | Known `device_id` list for HA config flow |
 | `GET` | `/api/devices/{device_id}/state` | Basic | Live energy / power / battery snapshot |
-| `GET` | `/api/devices/{device_id}/statistics` | Basic | 0-filled hour or 5-minute buckets |
+| `GET` | `/api/devices/{device_id}/statistics` | Basic | 0-filled hour or 5-minute buckets (HA imports both: hour → LTS, 5min → STS) |
 | `GET` | `/api/devices/{device_id}/readings` | Basic | Debug sparse readings (not used by HA Energy path) |
 | `GET` | `/healthz` | none | Liveness (Docker/Caddy health) |
 | `GET` | `/` | Basic | HTML index of dumps |
@@ -181,6 +181,15 @@ Returns devices that have at least one stored dump, newest `last_seen` first:
 
 Query params: `bucket=hour\|5min` (default `hour`), optional `since` / `until` (ISO-8601). `404` if unknown device.
 
+The backend contract supports both `hour` and `5min`. **Home Assistant (`custom_components/meter_buddy`) fetches and imports both** after each completed upload session (and on setup / poll):
+
+| Backend `bucket` | Recorder destination | Import path | Alignment guard |
+| --- | --- | --- | --- |
+| `hour` | Long-term statistics (Energy dashboard; kept permanently) | Public `async_import_statistics` | Top-of-hour only (`is_hour_aligned`); non-aligned `start` skipped |
+| `5min` | Short-term statistics (`statistics_short_term`; purged with recorder history, default ~10 days) | `get_instance(hass).async_import_statistics(meta, stats, StatisticsShortTerm)` — HA has no public 5-minute import API | 5-minute grid only (`is_five_min_aligned`); non-aligned `start` skipped |
+
+Five-minute aggregates remain available for other clients (UI, tools, tests) as well.
+
 ```json
 {
   "device_id": "meter-buddy-001",
@@ -196,7 +205,7 @@ Query params: `bucket=hour\|5min` (default `hour`), optional `since` / `until` (
 
 | Field | Type | Notes |
 | --- | --- | --- |
-| `start` | string | UTC ISO-8601 bucket start (`Z`) |
+| `start` | string | UTC ISO-8601 bucket start (`Z`); hour buckets are top-of-hour; 5min buckets are `:00`/`:05`/…/`:55` |
 | `energy_kwh_sum` | float | **Lifetime cumulative kWh at bucket end** (absolute), not per-bucket delta |
 | `power_w_mean` | float | Mean of period powers that fell in the bucket; **0.0** for idle buckets |
 
@@ -234,7 +243,7 @@ Query params: `bucket=hour\|5min` (default `hour`), optional `since` / `until` (
 
 Dump list / meta battery fields are read with `json_extract` on top-level `raw_json` (`$.battery_v` / `$.battery_pct_est`). The HTML index formats `battery_v` with three decimal places in the dump list, chart panel, and telemetry readout. When a reading lacks `battery_pct_est`, the lifetime calculator recomputes SoC from `battery_v` via `estimatePercentFromVolts` (same knots as firmware `kOcv`; see [fw_specification.md](../firmware/fw_specification.md) Battery ADC). `store_upload` persists `raw_json` via `model_dump(..., exclude_none=True)` so omitted optional keys stay omitted in stored JSON, and writes `upload_session_id` / `last_batch` columns when present.
 
-Home Assistant install and session-wait behavior: [custom_components/meter_buddy/README.md](../../custom_components/meter_buddy/README.md).
+Home Assistant install, session-wait, and **hour + 5min** statistics import (LTS / STS): [custom_components/meter_buddy/README.md](../../custom_components/meter_buddy/README.md).
 
 ## Firmware configuration
 

@@ -112,7 +112,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | N-3 | Unacknowledged committed records must be retained on-device **indefinitely until a successful upload acknowledges them**. Flash capacity is a practical limit; the device must not silently discard unacked records to free space. |
 | N-4 | **USB flashing is the primary** way to install firmware. **Network OTA is allowed** after a successful data upload when connectivity still permits it, and on demand from the diagnostics serial console — not forbidden. |
 | N-5 | The backend must serve device ingest and all operator UI/admin endpoints over **HTTPS** with **authenticated** access; only a dedicated unauthenticated liveness probe (e.g. `GET /healthz`) is exempt. |
-| N-6 | The backend must expose authenticated device list, live energy/power state, and preaggregated historical statistics (including idle intervals as zero power with cumulative energy carried forward) so a home-automation integration can import Energy history without recomputing sparse pulses itself. |
+| N-6 | The backend must expose authenticated device list, live energy/power state, and preaggregated historical statistics (including idle intervals as zero power with cumulative energy carried forward) so a home-automation integration can import Energy history without recomputing sparse pulses itself. The home-automation integration must import **both** backend bucket types: **hour-aligned** buckets into long-term / Energy-dashboard statistics (timestamps at top of hour; kept permanently), and **5-minute** buckets into short-term statistics (purged with recorder history, typically ~10 days). Backend aggregates must remain available to other clients and must not break either import path. |
 
 ---
 
@@ -132,7 +132,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |
 | P-8 / N-4 / D-3 | After successful upload with readings, OTA check may run before the upload network session is released; diagnostics may also run an OTA check on demand; USB flash remains a valid install path. |
-| P-9 / N-1 / N-6 | Multi-batch upload shares one session id with a final complete mark; HA (or similar) waits for that mark (or timeout), then pulls absolute live energy and 0-filled statistics from the backend — not from the device. |
+| P-9 / N-1 / N-6 | Multi-batch upload shares one session id with a final complete mark; HA (or similar) waits for that mark (or timeout), then pulls absolute live energy and 0-filled statistics for **both** `hour` (long-term) and `5min` (short-term) from the backend — not from the device. |
 | N-5 | Upload ingest, firmware OTA/list/sync routes (`/api/meter-buddy/firmware…`), dump browser UI, dump JSON, `/db`, device APIs, and live WebSocket require HTTPS + credentials; `/healthz` alone is unauthenticated. |
 
 When firmware behavior and [fw_specification.md](firmware/fw_specification.md) disagree with this intent, **intent wins for product decisions**; when they disagree only on how something is implemented, **fw_specification + code** win until intent is consciously revised.
