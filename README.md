@@ -32,8 +32,8 @@ See [docs/README.md](docs/README.md) for the documentation index. Package bounda
 | RTC wake | D3 | GPIO5 | DS3231 SQW/INT, active low |
 | I2C SDA | D4 | GPIO6 | DS3231 + AT24C32 |
 | I2C SCL | D5 | GPIO7 | DS3231 + AT24C32 |
-| Pulse LED | D8 | GPIO8 | Dedicated short flash for each accepted pulse |
-| Status LED | D10 | GPIO10 | Debug/status blink patterns |
+| Pulse LED | D8 | GPIO8 | ~100 ms flash per accepted pulse when unmasked; masked by default in production |
+| Status LED | D10 | GPIO10 | Upload / stay-awake / error patterns; routine awake/RTC indicators masked by default in production (`include/led_events.h`) |
 
 ## Configuration
 

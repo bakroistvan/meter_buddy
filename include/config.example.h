@@ -85,4 +85,7 @@ constexpr bool StayAwakeBoot = false;
 // Print debug lines on Serial when USB-serial is up.
 constexpr bool EnableSerialLogs = true;
 
+// LED event mask: see include/led_events.h (included from config.h).
+// Override with #define METER_BUDDY_LED_EVENT_MASK in local_config.h (0 = bench, all on).
+
 } // namespace config

@@ -72,7 +72,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | U-3 | Stay-awake mode keeps the device awake for inspection, live pulse indication, and operator commands over a serial console. |
 | U-4 | The operator must be able to exit stay-awake and return the device to normal sleeping operation (long-press toggle off, or diagnostics serial command). |
 | U-5 | With a debug host connected over USB serial, the device may remain awake for development without requiring the stay-awake flag. |
-| U-6 | Visible indicators must distinguish at least: idle awake, pulse seen (~100 ms flash per accepted pulse, including during long blocking work such as upload), housekeeping, upload in progress, upload failure, stay-awake enabled, stay-awake disabled. |
+| U-6 | When routine indicators are not compile-time masked, visible indicators must distinguish at least: idle awake, pulse seen (~100 ms flash per accepted pulse, including during long blocking work such as upload), RTC/housekeeping roll, upload in progress, upload failure, stay-awake enabled, stay-awake disabled. Production builds may mask routine indicators (idle-awake dim PWM, RTC period-roll blink, pulse LED flash) to save power, analogous to D-4 serial logging; user-action feedback (upload blink, stay-awake toggle, errors) must remain visible. |
 
 ---
 
@@ -125,7 +125,7 @@ Together with [firmware/fw_specification.md](firmware/fw_specification.md), this
 | M-5 / M-6 | Isolated pulse increments by one; burst trains are fully counted then sleep after quiet. |
 | W-4 / W-5 | Documented priority when button+RTC (+pulse) coincide; no corrupt records; deferred sources handled later. |
 | U-1 / U-2 | Short press uploads unless protection still latched after re-sample (then error indication, no Wi‑Fi); long press toggles stay-awake without upload (enable → stay awake; disable → sleep). |
-| U-6 | Pulse LED ~100 ms flash per accepted pulse even during upload; status LED patterns for upload, housekeeping, stay-awake, and failure. |
+| U-6 | Unmasked build: pulse LED ~100 ms flash per accepted pulse even during upload; status LED patterns for idle awake, RTC/housekeeping, upload, stay-awake, and failure. Production default masks routine awake/RTC/pulse indicators; upload `startPulseBlink`, stay-awake `doubleBlink`, and `rapidErrorBlink` always run. |
 | D-1 | Diagnostics `status` / `dump` expose storage health, open hot period, protection/reset_reason, and rolled-only JSON readings; low sample without USB exits to protection sleep. |
 | P-4 / P-5 / N-3 | Failed upload leaves data; LED error pattern; retry succeeds later; unacked records not silently dropped. |
 | P-6 | Empty heartbeat succeeds without error indication. |

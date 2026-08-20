@@ -23,10 +23,14 @@ public:
     mode = newMode;
   }
 
-  // Idle-awake indicator: dim PWM.
+  // Idle-awake indicator: dim PWM (skipped when led_event::Awake is masked).
   void setAwake() {
     stopPulseBlink();
     ensurePwm();
+    if ((config::LedEventMask & config::led_event::Awake) != 0) {
+      writeDuty(DutyOff);
+      return;
+    }
     writeDuty(DutyAwake);
   }
 
@@ -97,6 +101,9 @@ public:
 
   // One full flash, then restore previous duty (usually awake dim).
   void blink() {
+    if ((config::LedEventMask & config::led_event::RtcRoll) != 0) {
+      return;
+    }
     pulse(1);
   }
 

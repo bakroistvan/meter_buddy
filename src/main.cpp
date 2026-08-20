@@ -56,6 +56,9 @@ void pulseLedOffTimerCallback(TimerHandle_t) {
 }
 
 void initPulseLedOffTimer() {
+  if ((config::LedEventMask & config::led_event::Pulse) != 0) {
+    return;
+  }
   if (pulseLedOffTimer != nullptr) {
     return;
   }
@@ -281,8 +284,10 @@ void IRAM_ATTR onPulseRise() {
     ++awakePulseCount;
     lastPulseRiseMs = now;
     pulseDetected = true;
-    digitalWrite(pins::PulseLedPin, HIGH);
-    schedulePulseLedOffFromIsr();
+    if ((config::LedEventMask & config::led_event::Pulse) == 0) {
+      digitalWrite(pins::PulseLedPin, HIGH);
+      schedulePulseLedOffFromIsr();
+    }
   }
 }
 
@@ -351,9 +356,11 @@ uint32_t countAwakeUntilQuiet() {
 void handlePulseWake(uint32_t timestamp) {
   logEvent("pulse wake");
 
-  digitalWrite(pins::PulseLedPin, HIGH);
-  delay(100);
-  digitalWrite(pins::PulseLedPin, LOW);
+  if ((config::LedEventMask & config::led_event::Pulse) == 0) {
+    digitalWrite(pins::PulseLedPin, HIGH);
+    delay(100);
+    digitalWrite(pins::PulseLedPin, LOW);
+  }
 
   const bool sleepNow = sleepMakesSenseAfterPulse(timestamp);
   lastPulseWakeUnix = timestamp;

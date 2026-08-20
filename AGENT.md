@@ -38,7 +38,7 @@ Index and archive map: [docs/README.md](docs/README.md).
 - Deep sleep; GPIO **LOW** wake on button (D1), RTC (D3), pulse/TEMT6000 (D2).
 - Awake pulse ISR: **FALLING**. Priority after GPIO wake: button > RTC > pulse default.
 - Hot pulse counters in RTC RAM; LittleFS for committed periods; upload on short press.
-- Status LED (D10): dim = awake, full = upload, patterns for RTC / stay-awake / errors.
+- Status LED (D10): dim = awake, upload blink, RTC / stay-awake / error patterns; production default masks routine awake/RTC/pulse indicators (`LedEventMask` in `led_events.h`).
 - When changing behavior, update SoT in the same change (see `.cursor/rules/`).
 
 ## Backend basics

@@ -13,7 +13,7 @@ This document describes **what the firmware does today**, including architecture
 ### US-1 — Isolated meter pulse
 **Given** the device is in deep sleep,  
 **When** a short optical S0 pulse (~3–50 ms) asserts `PulseWakePin` LOW,  
-**Then** if `protectionLocked()` is already true (stray pulse GPIO while locked), firmware heals to `enterProtectionSleep()` without counting (US-11). Otherwise the device flashes the pulse LED ~100 ms, increments the hot pulse counter by 1 via `storage::addPulses` (RTC RAM; does **not** require LittleFS / `storage::begin()` success), and calls `enterDeepSleep()` (deep sleep when enabled; see US-9 if disabled). No Wi‑Fi. No LittleFS period append on this path.
+**Then** if `protectionLocked()` is already true (stray pulse GPIO while locked), firmware heals to `enterProtectionSleep()` without counting (US-11). Otherwise, when `led_event::Pulse` is not masked (`LedEventMask & Pulse == 0`), the device flashes the pulse LED ~100 ms; pulse counting and sleep proceed regardless of the mask. It increments the hot pulse counter by 1 via `storage::addPulses` (RTC RAM; does **not** require LittleFS / `storage::begin()` success), and calls `enterDeepSleep()` (deep sleep when enabled; see US-9 if disabled). No Wi‑Fi. No LittleFS period append on this path.
 
 ### US-2 — Frequent / burst pulses
 **Given** another pulse wake occurs more than 0 s and within `PulseAwakeThresholdMs` (8 s) after the last *accepted* pulse wake timestamp,  
@@ -25,7 +25,7 @@ This document describes **what the firmware does today**, including architecture
 ### US-3 — RTC period roll (housekeeping)
 **Given** deep sleep (or an awake diagnostics session),  
 **When** the DS3231 alarm asserts `RtcWakePin` LOW and the RTC path runs,  
-**Then** firmware clears/reschedules the alarm, samples battery via `battery::sampleForRecord()` (forces Wi‑Fi off, waits `BatteryAdcSettleMs`, then ADC sample), and calls `rollCurrentPeriod` with that mV (requires LittleFS / `storage::begin()` success). If hot pulses &gt; 0 and roll succeeds, a completed period record is appended and hot counters reset; if hot == 0, there is no append (period start may advance). With `EnableSerialLogs`, RTC roll always logs `hot_pulses` — including explicit `(no append)` when hot == 0, `-> appended` on success with hot &gt; 0, or `append failed storage_ok=…` when roll fails — plus battery V/pct. Then blinks the status LED once. After the sample, `evaluateProtectionLock` may latch protection and call `rtc_clock::disableWakeAlarm()` instead of `scheduleNextWakeAlarm`. From a deep-sleep RTC wake, the caller then `enterProtectionSleep()` if locked, else `enterDeepSleep()`. From diagnostics, the REPL continues without sleeping unless protection latched (then `enterProtectionSleep()`).
+**Then** firmware clears/reschedules the alarm, samples battery via `battery::sampleForRecord()` (forces Wi‑Fi off, waits `BatteryAdcSettleMs`, then ADC sample), and calls `rollCurrentPeriod` with that mV (requires LittleFS / `storage::begin()` success). If hot pulses &gt; 0 and roll succeeds, a completed period record is appended and hot counters reset; if hot == 0, there is no append (period start may advance). With `EnableSerialLogs`, RTC roll always logs `hot_pulses` — including explicit `(no append)` when hot == 0, `-> appended` on success with hot &gt; 0, or `append failed storage_ok=…` when roll fails — plus battery V/pct. Then, when `led_event::RtcRoll` is not masked, blinks the status LED once (`AwakeLed::blink`). After the sample, `evaluateProtectionLock` may latch protection and call `rtc_clock::disableWakeAlarm()` instead of `scheduleNextWakeAlarm`. From a deep-sleep RTC wake, the caller then `enterProtectionSleep()` if locked, else `enterDeepSleep()`. From diagnostics, the REPL continues without sleeping unless protection latched (then `enterProtectionSleep()`).
 
 ### US-4 — Short upload button press
 **Given** sleep or an awake session,  
@@ -72,10 +72,23 @@ If `KeepWifiConnectedWhenAwake` is true, entering stay-awake also connects Wi‑
 **Then** `battery::noteResetReason()` then `sampleForRecord` + `evaluateProtectionLock` may latch protection and `enterProtectionSleep()` (US-11). Otherwise the next RTC alarm is scheduled (if RTC is available) and the device enters deep sleep immediately (no REPL). If deep sleep is disabled, see US-9.
 
 ### US-8 — LED meanings
+
+Compile-time **`LedEventMask`** (`include/led_events.h`, included from `config.h`) suppresses **routine** indicators to save power. A bit **set** in the mask means that event’s LED action is skipped; `config::ledEventEnabled(bit)` is true when the bit is **not** set. Override before `config.h` with `#define METER_BUDDY_LED_EVENT_MASK 0` in `local_config.h` for bench (show all routine indicators).
+
+| `config::led_event` bit | Value | When masked (default production) |
+| --- | --- | --- |
+| `Awake` | `1 << 0` | `setAwake()` leaves status LED off instead of dim PWM (~30%, duty 77) |
+| `RtcRoll` | `1 << 1` | `blink()` after RTC period roll is a no-op |
+| `Pulse` | `1 << 2` | Pulse LED (D8) not driven on isolated pulse wake or pulse ISR; off timer not created |
+
+**Production default:** `LedEventMask = Awake | RtcRoll | Pulse` (all three routine events masked).
+
+**Always shown (not gated by mask):** upload `startPulseBlink` (dim ↔ full every 400 ms); stay-awake enable `setOn` + `doubleBlink`; `rapidErrorBlink` (10×) for upload failure, stay-awake disable, or protection still latched / upload blocked; `setOn` / `setOff` / `setSleep` as called. After gated `setAwake`, status LED stays off when `Awake` is masked.
+
 | LED | Pin | Meaning |
 | --- | --- | --- |
-| Pulse LED | D8 | HIGH ~100 ms per accepted pulse (wake flash or ISR); off via FreeRTOS one-shot timer reset from ISR (not main-loop polling) |
-| Status (`AwakeLed`) | D10 | Dim PWM (~30%, duty 77) = idle awake; `startPulseBlink` (dim ↔ full every 400 ms, `esp_timer`) = upload in progress; full (`setOn`) + `doubleBlink` + `setAwake` = stay-awake **enabled** (long-press toggle on); `blink` = RTC wake; `rapidErrorBlink` (10×) = upload failure, stay-awake **disabled** (long-press toggle off), **or** protection still latched / upload blocked by protection (button re-sample below unlock without USB); off + pulldown = sleep. `setAwake` / `setOn` / `setOff` / `setSleep` / `pulse` stop the upload blink timer. |
+| Pulse LED | D8 | When `Pulse` unmasked: HIGH ~100 ms per accepted pulse (wake flash or ISR); off via FreeRTOS one-shot timer reset from ISR (not main-loop polling). Masked: no flash; counting unchanged. |
+| Status (`AwakeLed`) | D10 | When `Awake` unmasked: dim PWM = idle awake. `startPulseBlink` (dim ↔ full every 400 ms, `esp_timer`) = upload in progress; full (`setOn`) + `doubleBlink` + `setAwake` = stay-awake **enabled** (long-press toggle on); when `RtcRoll` unmasked: `blink` = RTC wake; `rapidErrorBlink` (10×) = upload failure, stay-awake **disabled** (long-press toggle off), **or** protection still latched / upload blocked by protection (button re-sample below unlock without USB); off + pulldown = sleep. `setAwake` / `setOn` / `setOff` / `setSleep` / `pulse` stop the upload blink timer. |
 
 ### US-9 — Deep sleep disabled
 **Given** `EnableDeepSleep=false`,  
@@ -160,6 +173,8 @@ USB plugged (`Serial.isPlugged()`): treated as powered — do not enter lock; if
 | `KeepWifiConnectedWhenAwake` | false | Keep Wi‑Fi after POST / on stay-awake entry |
 | `StayAwakeBoot` | false | Compile-time default for stay-awake cache before/without flash file |
 | `EnableSerialLogs` | true | Serial logging |
+| `LedEventMask` | `Awake \| RtcRoll \| Pulse` | Bits set = suppress routine indicators (`include/led_events.h`); user-action patterns always run |
+| `METER_BUDDY_LED_EVENT_MASK` | (same as default) | Optional `#define` before `config.h` (e.g. in `local_config.h`); `0` = bench, all routine indicators on |
 | `MaxUploadRecords` | 128 | Max readings in one upload JSON; further unsynced records go in follow-up POSTs (`truncated`) |
 | `MaxUploadErrors` | 8 | Max `errors[]` entries on one upload JSON |
 | `UploadUrl` | `https://…/api/meter-buddy/upload` | Full HTTPS upload endpoint |

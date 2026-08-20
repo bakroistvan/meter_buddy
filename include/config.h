@@ -7,3 +7,5 @@
 #else
 #include "config.example.h"
 #endif
+
+#include "led_events.h"
