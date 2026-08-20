@@ -67,6 +67,24 @@ First boot may take a minute while Caddy obtains the certificate.
 
 Do **not** set `METER_BUDDY_ALLOW_INSECURE_AUTH` in production. Never commit `.env`.
 
+## Troubleshooting
+
+### `sqlite3.OperationalError: attempt to write a readonly database`
+
+The backend container is `read_only` and runs as UID **10001**. SQLite must live on the writable `/data` volume (`METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3`). If that volume is root-owned, startup fails at `init_db()`.
+
+**Fix now** (from the directory that has your `docker-compose.yml`):
+
+```bash
+docker compose stop backend
+vol="$(docker volume ls -q | grep backend_data | head -n1)"
+docker run --rm -u 0 -v "${vol}:/data" alpine:3.20 chown -R 10001:10001 /data
+# Confirm .env has: METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3
+docker compose up -d
+```
+
+Current `deploy/docker-compose.yml` runs a one-shot `backend-perms` service that `chown`s `/data` before backend starts. Pull/copy that compose file (or apply the same `backend-perms` block) so this does not recur.
+
 ## Backup
 
 - Download DB (Basic Auth): `GET /db`

@@ -25,6 +25,15 @@ services:
       - backend
     restart: unless-stopped
 
+  # Named volumes are often root-owned; backend runs as uid 10001 (read_only rootfs).
+  backend-perms:
+    image: alpine:3.20
+    user: root
+    volumes:
+      - backend_data:/data
+    command: ["chown", "-R", "10001:10001", "/data"]
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -35,6 +44,9 @@ services:
       - backend_data:/data
     networks:
       - meter_buddy
+    depends_on:
+      backend-perms:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp

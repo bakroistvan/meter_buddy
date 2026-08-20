@@ -23,7 +23,19 @@ def db_path() -> Path:
 
 def connect() -> sqlite3.Connection:
     path = db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    parent = path.parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        # Probe directory writability (SQLite needs create/journal next to the db).
+        probe = parent / ".meter_buddy_write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except OSError as exc:
+        raise RuntimeError(
+            f"database path is not writable: {path} ({exc}). "
+            "In Docker, set METER_BUDDY_DB_PATH=/data/meter_buddy.sqlite3 and ensure "
+            "the /data volume is owned by uid 10001 (see deploy/README.md)."
+        ) from exc
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
